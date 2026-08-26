@@ -1,0 +1,45 @@
+---
+description: Testing patterns for Easy Write — and the fact that no test target exists yet
+globs: "Tests/**/*.swift"
+alwaysApply: false
+---
+
+# Testing Conventions
+
+Full guide: `docs/conventions/testing/README.md`
+
+## Current state — read this first
+
+**There is no test target.** `Package.swift` declares a single `.executableTarget`, there is no `Tests/` directory, and `swift test` does not run anything. Do not write documentation, plans, or PR text that implies a suite exists.
+
+Verification today is a manual smoke test on a supported Mac (see the full guide). Anything that must be proven automatically needs the target added first.
+
+## Adding the target
+
+```swift
+.testTarget(
+    name: "EasyWriteTests",
+    dependencies: ["EasyWrite"],
+    path: "Tests/EasyWriteTests"
+)
+```
+
+Prefer extracting the pure logic under test into a plain library target and depending on that, rather than importing the executable. Adding a test target is a change to the package layout — get agreement before doing it as a side effect of another task.
+
+## Key Rules (once tests exist)
+
+- **Use Swift Testing** (`import Testing`, `@Test`, `#expect`) for new tests; the Swift 6 toolchain ships it.
+- **Test pure logic only** — key-code formatting, language lookup, response cleaning, shortcut merge/decode. `@MainActor` AppKit flows and the on-device model are not unit-testable.
+- **Never call the model in a test** — it needs Apple Intelligence hardware and gives non-deterministic output.
+- **Never touch `UserDefaults.standard`** — inject a `UserDefaults(suiteName:)` and remove it afterwards.
+- **Naming**: given/when/then, as the test's display name: `@Test("given a stored shortcut, when defaults gain a new action, then the new default is merged in")`.
+- **One behaviour per test.** No shared mutable state between tests.
+- **English** in test names, comments, and failure messages.
+
+## Run
+
+```bash
+swift build            # the real gate today — must be warning-free
+swift test             # only after a test target exists
+./build.sh             # release bundle for manual verification
+```
