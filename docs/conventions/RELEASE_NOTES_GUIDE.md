@@ -59,12 +59,18 @@ purely because it is what you used does not.
 ### 1. Identify the changes
 
 Compare only the commits the branch introduced since it diverged from `main`.
-Use the three-dot syntax so later changes on `main` are excluded:
+The two commands need different ranges to agree on that:
 
 ```bash
-git log --oneline main...HEAD
-git diff main...HEAD --stat
+git log --oneline main..HEAD     # two dots: commits on HEAD and not on main
+git diff main...HEAD --stat      # three dots: diff against the merge base
 ```
+
+For `git log`, three dots means the *symmetric difference*, so `main...HEAD`
+also lists commits that exist only on `main` — someone else's work, not yours to
+write up. For `git diff`, three dots means "compare against the merge base",
+which is exactly what excludes later changes on `main`. Keep two dots for the
+commit list and three for the diff.
 
 Then read the diff of the files that can actually change behaviour:
 
