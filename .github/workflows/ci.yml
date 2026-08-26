@@ -1,12 +1,12 @@
 name: CI
 
-# Pre-merge gate on every pull request, plus a post-merge signal on the default branch.
-# Feature branches are covered by their pull request, so no commit is built twice.
+# Every push gets a signal, including work on a branch that has no pull request yet, and every
+# pull request is gated before merge. A commit on a branch with an open pull request is therefore
+# built twice; that is affordable here because the repository is public and macOS runner minutes
+# are free. Narrow the push trigger to `branches: [main]` if that ever stops being true.
 on:
   push:
-    branches: [main]
   pull_request:
-    branches: [main]
 
 permissions:
   contents: read
