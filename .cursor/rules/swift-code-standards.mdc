@@ -1,0 +1,103 @@
+---
+description: Swift code patterns specific to this project
+globs: "Sources/**/*.swift"
+alwaysApply: false
+---
+
+# Swift Code Patterns
+
+Full conventions: `docs/conventions/CODING_CONVENTIONS.md`
+
+## Project-Specific Patterns
+
+### Settings — always through `Store.shared`, never `UserDefaults`
+
+```swift
+// GOOD
+Store.shared.targetCode = code
+let sc = Store.shared.shortcut(for: "formal")
+
+// BAD — skips persistence and the onChange hook that re-registers hot-keys
+UserDefaults.standard.set(code, forKey: "targetLanguageCode")
+```
+
+A new setting is a `@Published` property on `Store` whose `didSet` writes to `UserDefaults` and calls `onChange?()` when the menu or hot-keys depend on it. Decode persisted dictionaries by merging over the defaults, so an upgrade never drops a key.
+
+### Main-actor by default
+
+```swift
+// GOOD
+@MainActor
+final class ReaderPanel { /* ... */ }
+
+Task { @MainActor in
+    defer { busy = false }
+    let result = try await llm.translate(text, toLanguageNamed: language, register: register)
+}
+
+// BAD — background queue touching UI state
+DispatchQueue.global().async { self.statusItem.button?.image = image }
+```
+
+`HotKeyCenter` is the one non-isolated type: it is driven by a Carbon C callback and hops back with `DispatchQueue.main.async` before calling app code. Pure helpers may be `nonisolated static func`. Escaping closures that outlive the call capture `[weak self]`.
+
+### Long-running model calls race a timeout
+
+```swift
+try await withThrowingTaskGroup(of: String.self) { group in
+    group.addTask { /* real work */ }
+    group.addTask { try await Task.sleep(nanoseconds: 20_000_000_000); throw TimeoutError() }
+    defer { group.cancelAll() }
+    return try await group.next()!
+}
+```
+
+A stalled request must never wedge the app. Retry transient errors once; never retry a timeout or a cancellation.
+
+### Failure is feedback, not a crash
+
+```swift
+// GOOD — transient failure
+NSSound.beep(); flashIcon("exclamationmark.bubble", revertAfter: 1.1)
+
+// GOOD — user-actionable failure
+notify(reason.message)          // NSAlert with a specific, fixable explanation
+
+// BAD
+try! SMAppService.mainApp.register()
+```
+
+No `try!`, no `fatalError`. Use `try?` for best-effort side effects, `do`/`catch` + `NSAlert` when the user can fix it. Model framework enums get `@unknown default`.
+
+### Privacy is a hard invariant
+
+No `URLSession`, no sockets, no analytics, no `print`/`os_log` of user text, no third-party packages. The clipboard is snapshotted before a swap and restored after.
+
+### Comments — explain WHY, not WHAT
+
+```swift
+// GOOD — decodes a magic number
+postCmd(virtualKey: 8)      // 8 = C
+
+// GOOD — records a platform gotcha
+// .privateState => our synthetic events ignore physically-held modifier keys
+private let source = CGEventSource(stateID: .privateState)
+
+// BAD — narrates the next line
+// set the busy icon
+setIcon(busy: true)
+```
+
+Use `///` doc comments on types and non-obvious methods to state the contract or the reason the thing exists, never to restate its name. Use `// MARK:` to group sections in larger types.
+
+### Formatting
+
+4 spaces, never tabs. Braces on the same line. Wrap around 100–110 columns (a long user-facing string may run over rather than be split awkwardly). Underscore separators in long numeric literals: `20_000_000_000`, `120_000`.
+
+### Types
+
+`final class` for reference types, `struct` for values, `enum` for closed sets and for static-only namespaces (`KeyDisplay`, `Languages`). Singletons are `static let shared` with a `private init()`.
+
+### Files and frameworks
+
+One primary type per file, named after it; a small satellite (a SwiftUI view for its controller) may share the file. Drop new `.swift` files straight into `Sources/EasyWrite/` — SPM globs the directory, so no manifest edit is needed. A new **system framework** does need a `linkerSettings` entry in `Package.swift`.

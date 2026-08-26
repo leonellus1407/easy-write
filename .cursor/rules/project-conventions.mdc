@@ -1,0 +1,64 @@
+---
+description: Core project conventions and documentation references
+alwaysApply: true
+---
+
+# Easy Write — Project Conventions
+
+macOS 26+ menu-bar app (`LSUIElement`, no Dock icon), Swift 6 toolchain in Swift 5 language mode, built with Swift Package Manager. One executable target, `EasyWrite`. Entry point: `Sources/EasyWrite/main.swift` → `AppDelegate`.
+
+Translation runs on Apple's on-device Foundation Models. Requires Apple Silicon and Apple Intelligence at runtime.
+
+## Authoritative Documentation
+
+Read these before making changes:
+
+- **Product, install, usage**: `README.md`
+- **Architecture tour**: `HOW_IT_WORKS.md`
+- **Orientation for AI agents**: `docs/AI_Overview.md`
+- **Code style, naming, concurrency, settings, error handling**: `docs/conventions/CODING_CONVENTIONS.md`
+- **Testing**: `docs/conventions/testing/README.md`
+- **AI workflow & guardrails**: `docs/conventions/AI_WORKFLOW.md`
+- **Release notes**: `docs/conventions/RELEASE_NOTES_GUIDE.md`
+- **Privacy & permissions**: `SECURITY.md`
+- **Feature specs**: `docs/requirements/`
+- **Fix / cleanup / refactor plans**: `docs/plans/`
+
+## Most-Violated Rules (always remember)
+
+- **No network code** — no `URLSession`, no sockets, no analytics, no crash reporting. "Nothing leaves your Mac" is the product, not a preference.
+- **No third-party dependencies** — `Package.swift` declares no `dependencies:`. Standard library and Apple frameworks only.
+- **Never log or persist user text** — no `print`, no `os_log`, no translation history on disk. Selection text lives in memory for the duration of one translation.
+- **4 spaces** for indentation, never tabs.
+- **`@MainActor` by default** — anything touching AppKit, SwiftUI, or `Store` is main-actor isolated. `HotKeyCenter` is the single exception (Carbon C callback; it hops back via `DispatchQueue.main.async`).
+- **Settings only through `Store.shared`** — never read or write `UserDefaults` directly for a user setting. (The `didInitLoginItem` first-run flag in `AppDelegate` is the one pre-existing exception; do not add more.)
+- **Never crash on a translation failure** — beep, flash the status icon, and carry on. No `try!`, no `fatalError`.
+- **Always restore the clipboard** after a swap; snapshot it first.
+- **User-facing text**: English, sentence case, typographic punctuation (`’ “ ” –`), no emoji in app strings.
+- **Never weaken the guardrail mode** — `.permissiveContentTransformations` exists because the default filter false-flags ordinary text for translation.
+
+## Build & Run
+
+```bash
+swift build                 # debug
+swift build -c release      # what build.sh compiles
+./build.sh                  # release build → EasyWrite.app bundle → codesign
+./setup-signing.sh          # one-time: stable self-signed identity (keeps the Accessibility grant)
+```
+
+Builds only on macOS 26+ / Apple Silicon. There is **no test target** — see `docs/conventions/testing/README.md` before writing tests. There is no linter and no CI; `swift build` must finish warning-free.
+
+## Git
+
+- Commit format: a capitalised English sentence describing the change, no prefix tag, no trailing period. Examples from real history: "Add Arabic language (v1.1)", "Show specific reason when Apple Intelligence is unavailable", "Replace README demo with a premium animated walkthrough".
+- Branches: `dev/<descriptive-name>` (e.g. `dev/popup`). `main` is the primary branch.
+- Never commit `.build/`, `EasyWrite.app/`, `Package.resolved`, `.swiftpm/`, or `.DS_Store` (see `.gitignore`). Signing keys live in a keychain under `~/Library`, never in the repo.
+
+## Versioning
+
+A user-visible release bumps `CFBundleShortVersionString` **and** `CFBundleVersion` in `Info.plist`, and adds a `CHANGELOG.md` entry. The menu-bar header reads the short version straight from the bundle.
+
+## Planning Work
+
+- **New feature** → spec in `docs/requirements/{N}_{name}.md`, following `docs/requirements/0_TEMPLATE.md`.
+- **Fix, cleanup, or refactor of existing code** → plan in `docs/plans/{N}_{name}.md`, following the rules in `.cursor/rules/plan-conventions.mdc`.

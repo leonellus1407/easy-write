@@ -1,0 +1,68 @@
+---
+description: How to create and edit cleanup, fix and refactor plans (Plan mode and any *.md plan under docs/plans/) — where plans live, how they are written, and how they are revised
+alwaysApply: true
+---
+
+# Plan Writing Rules
+
+Apply these whenever you create or edit a cleanup, fix or refactor plan for code that already exists, including in Plan mode.
+
+A specification for a NEW feature is not a plan. It goes to `docs/requirements/{N}_{name}.md` and follows `docs/requirements/0_TEMPLATE.md`, not the rules below.
+
+## 1. Where plans live
+
+- Every plan is ONE Markdown file in `docs/plans/` (relative to repo root).
+- Never put a plan in a system or internal directory (for example `.cursor/`, temp folders, or OS paths).
+- Use flat files. Do not build nested folder trees for a plan.
+
+## 2. One plan, one file
+
+- Create exactly one plan file. That file is the only source of truth.
+- Do NOT also create a second or "internal" plan and keep two copies in sync.
+- If Plan mode keeps its own plan, the `docs/plans/` file is the real one. Do not copy its content into another doc.
+
+## 3. Write in simple English
+
+- Use short, everyday words and short sentences.
+- If a simple word works, use it instead of a fancy one.
+- English only, in every file in this repo.
+
+## 4. Structure (in this order)
+
+1. **TL;DR** — max 3 bullets.
+2. **Decisions** — a table: Decision | Choice | Why (<=10 words). "Why" is the reason the choice is good on its own, not why it beats an older idea.
+3. **Changes** — a checklist, one line per file. No paragraphs.
+4. **Details** — any long reasoning goes here, inside a collapsible `<details>` block.
+
+Rules: use bullet fragments, not paragraphs, above "Details". Max 8 bullets per section.
+
+## 5. The plan shows only how things are NOW
+
+- The plan is standalone. The reader never saw the old version.
+- Write only the current decision. Never mention past versions of the plan.
+- Never write "changed from X", "was X", "X not Y", "instead of X", "previously", or "updated to".
+- If asked to change 1 to 2, the doc just says 2 — as if it always said 2.
+
+## 6. Revising a plan
+
+- Edit the file in place. Never reprint the full plan in chat.
+- In chat, reply only with: (1) a short changelog (section + one-line reason), and (2) open questions.
+- Make the smallest edit that does the job. Do not reword, reorder, or reformat unchanged content. Keep existing wording exactly, except the lines the change needs.
+- Say which sections you did not touch.
+
+## 7. Only change what is needed
+
+- Change only what the request asks for.
+- Do not edit a section just because you saw it. No far-fetched or "just in case" changes.
+- Never edit something only to look productive or to make the response bigger.
+- If nothing needs to change, change nothing.
+
+## 8. Claims must be checked, not guessed
+
+- Mark a symptom "reproduced" only after you actually ran the app and saw it. Otherwise say it is read from the code.
+- Cite the file and line you read: `Sources/EasyWrite/Replacer.swift:31`.
+- This app cannot be exercised on CI or on a non-Apple-Silicon machine, so "reproduced" means a manual run on a supported Mac.
+
+## 9. Before writing a new plan
+
+- If anything is unclear, ask up to 5 multiple-choice questions first, then write the plan.
