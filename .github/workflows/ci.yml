@@ -1,11 +1,12 @@
 name: CI
 
-# Every push gets a signal, including work on a branch that has no pull request yet, and every
-# pull request is gated before merge. A commit on a branch with an open pull request is therefore
-# built twice; that is affordable here because the repository is public and macOS runner minutes
-# are free. Narrow the push trigger to `branches: [main]` if that ever stops being true.
+# Pull requests are gated before merge, and main is rebuilt after it. Push is deliberately
+# limited to main: hosted macOS runners are the scarce resource here, and an unfiltered push
+# trigger would both queue a job for every branch and build a commit twice once its pull request
+# exists, competing with itself for that capacity.
 on:
   push:
+    branches: [main]
   pull_request:
 
 permissions:
