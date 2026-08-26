@@ -1,0 +1,43 @@
+name: CI
+
+# Pre-merge gate on every pull request, plus a post-merge signal on the default branch.
+# Feature branches are covered by their pull request, so no commit is built twice.
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  test:
+    name: Build and test
+    # The package deployment target is macOS 26, so the image has to ship the macOS 26 SDK.
+    # Pinned instead of macos-latest: a future -latest migration must not silently move this
+    # onto an image whose SDK is older than the platform floor in Package.swift.
+    runs-on: macos-26
+    timeout-minutes: 30
+
+    steps:
+      - uses: actions/checkout@v7
+
+      # Recorded so a failure caused by a default-Xcode bump on the image is obvious from the log.
+      - name: Report toolchain
+        run: |
+          xcodebuild -version
+          swift --version
+
+      # Separate from the test step so "the app no longer compiles" is distinguishable from
+      # "a test failed". This also covers the AppKit and FoundationModels code, which has no
+      # unit tests of its own.
+      - name: Build
+        run: swift build
+
+      - name: Test
+        run: swift test
