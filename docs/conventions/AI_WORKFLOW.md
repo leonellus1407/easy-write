@@ -40,9 +40,10 @@ Every new AI session must read the following **before** the first code edit:
 is large, hold a summary in working memory so you can answer "what does the doc
 say about X?" later in the session.
 
-Also read the actual Swift file you are about to change, end to end. It is under
-200 lines. There is no excuse for patching a function you have only seen a
-fragment of.
+Also read the actual Swift file you are about to change, end to end — not the
+hunk your search matched. Every file in `Sources/EasyWrite/` is small enough to
+fit in context, so there is no excuse for patching a function you have only seen
+a fragment of. Do not substitute an assumed file size for looking.
 
 ---
 
@@ -56,7 +57,8 @@ yourself before opening a PR or asking for review:
   persisted content? (If yes: stop — see section 6.)
 - Did I `rg` for every caller of the API I changed?
 - Has every new `if` been classified (invariant / workaround / dead branch)?
-- Is the diff ≤ 50 added lines in every changed file?
+- Is the diff ≤ 50 added lines in every changed file under `Sources/EasyWrite/`?
+  (Section 3 — the budget covers Swift sources only.)
 - Does `swift build` finish with no new warnings?
 - Does `swift build -c release` succeed?
 - Did I run the manual smoke test from
@@ -71,14 +73,32 @@ yourself before opening a PR or asking for review:
 
 ## 3. Diff-size budget
 
+**This budget applies to `Sources/EasyWrite/*.swift` and to nothing else.**
+
 | Level | Threshold | Action |
 |---|---|---|
-| Soft | +50 added lines in one file per commit | Justify in the PR description. |
-| Hard | +50 added lines in one file across the whole PR | Do not breach without explicit agreement (a reviewer comment, or an explicit "yes, splitting is impossible because…"). |
+| Soft | +50 added lines in one Swift file per commit | Justify in the PR description. |
+| Hard | +50 added lines in one Swift file across the whole PR | Do not breach without explicit agreement (a reviewer comment, or an explicit "yes, splitting is impossible because…"). |
 
 The budget is tight on purpose. The whole app is ten files; a 200-line addition
 to one of them is a new component wearing a trench coat. Split it into its own
 file — SwiftPM picks it up with no manifest edit.
+
+### Why documentation is out of scope
+
+Markdown, the `.cursor/rules/*.mdc` files, and the shell scripts are not
+governed by the numbers above. The argument for the limit is a code-structure
+argument: an oversized Swift file is usually a type that wants extracting, and
+SwiftPM makes extracting it free. Prose has no equivalent move — splitting a
+convention document into 50-line fragments would scatter one topic across
+several files and break the one-fact-one-place rule that
+[`CODING_CONVENTIONS.md`](CODING_CONVENTIONS.md) opens with.
+
+Be honest about the history here: the commit that introduced this document
+added more than 50 lines to twelve of the thirteen files it created. Read as an
+unscoped rule, the budget was breached the moment it was written. The constraint
+that does apply to documentation is accuracy, not length — a doc is too long
+when it repeats something that already has an owner elsewhere.
 
 ---
 
