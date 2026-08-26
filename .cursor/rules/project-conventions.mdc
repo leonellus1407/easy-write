@@ -30,7 +30,7 @@ Read these before making changes:
 - **No third-party dependencies** — `Package.swift` declares no `dependencies:`. Standard library and Apple frameworks only.
 - **Never log or persist user text** — no `print`, no `os_log`, no translation history on disk. Selection text lives in memory for the duration of one translation.
 - **4 spaces** for indentation, never tabs.
-- **`@MainActor` by default** — anything touching AppKit, SwiftUI, or `Store` is main-actor isolated. `HotKeyCenter` is the single exception (Carbon C callback; it hops back via `DispatchQueue.main.async`).
+- **`@MainActor` by default** — every class that owns app state or an AppKit object is main-actor isolated. `HotKeyCenter` is the single exception among those (Carbon C callback; it hops back via `DispatchQueue.main.async`). SwiftUI views stay `struct`s, and static-only namespaces like `KeyDisplay` stay non-isolated — do not convert either into a class.
 - **Settings only through `Store.shared`** — never read or write `UserDefaults` directly for a user setting. (The `didInitLoginItem` first-run flag in `AppDelegate` is the one pre-existing exception; do not add more.)
 - **Never crash on a translation failure** — beep, flash the status icon, and carry on. No `try!`, no `fatalError`.
 - **Always restore the clipboard** after a swap; snapshot it first.

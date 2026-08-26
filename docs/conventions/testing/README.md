@@ -177,7 +177,7 @@ Apple Intelligence enabled, after `./setup-signing.sh` has been run once.
 | 5 | Repeat with `⌥⌘I` | Informal forms (German *du*, French *tu*, …) instead of formal |
 | 6 | Repeat with `⌥⌘P` | Translation that keeps the source's tone |
 | 7 | Select foreign text on a web page in Safari, press `⌥⌘E` | Floating popup appears near the cursor with the English text; Safari keeps focus; Copy and Done work; it disappears on its own after ~30 s |
-| 8 | Copy a distinctive string, then run any translation | After the swap, the original clipboard content is back |
+| 8 | Copy a distinctive string, then translate with `⌥⌘T` so the selection is replaced | Within about a second of the paste, the original clipboard content is back. Scoped to the replacing paths — see the note below |
 | 9 | Press a shortcut with nothing selected | Single beep, no dialog, no crash |
 | 10 | Preferences → change target language | Menu labels and pronoun hints update immediately |
 | 11 | Preferences → rebind a shortcut, press Esc | Recording cancels, the old shortcut still works |
@@ -189,6 +189,37 @@ Apple Intelligence enabled, after `./setup-signing.sh` has been run once.
 
 If a step cannot be run — wrong hardware, Apple Intelligence unavailable — say
 so explicitly rather than skipping it silently.
+
+### Why step 8 is scoped to a replacing translation
+
+`Replacer.copySelection()` snapshots the pasteboard and then overwrites it with
+a synthetic ⌘C. That snapshot is written back in exactly one place —
+`Replacer.replaceSelection(with:)` — and only two paths reach it: a translation
+with "Preview before replacing" off, and the **Replace** button in the preview
+dialog. Every other way out of a translation returns without restoring, leaving
+the copied selection on the clipboard:
+
+| Exit path | Clipboard afterwards |
+|---|---|
+| Translation replaces the selection (`⌥⌘T`, `⌥⌘I`, `⌥⌘P` with preview off) | Restored |
+| Preview dialog → **Replace** | Restored |
+| Preview dialog → **Copy** | Holds the translation — intended, the user asked for it |
+| Preview dialog → **Cancel** | Holds the copied selection |
+| Read mode (`⌥⌘E`) | Holds the copied selection |
+| Selection is only whitespace | Holds the copied selection |
+| Model returns an empty result | Holds the copied selection |
+| Translation fails or times out | Holds the copied selection |
+
+Pressing a shortcut with genuinely nothing selected is the one benign case: the
+pasteboard never changes, so `copySelection()` returns `nil` after its poll
+window and there is nothing to restore.
+
+This is read from the code, not reproduced — it needs confirming on a supported
+Mac. It reads like a bug rather than a decision, and it is written down here so
+that step 8 does not assert behaviour the app does not have. Do not widen step 8
+back to "any translation" unless the restore is extended to those paths; that is
+a change to `Sources/`, which needs its own plan under
+[`docs/plans/`](../../plans/README.md).
 
 ---
 

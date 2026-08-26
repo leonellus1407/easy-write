@@ -58,11 +58,14 @@ record. Do not delete it.
 - `1_reader-panel-focus-handling.md`
 - `2_shortcut-recorder-edge-cases.md`
 
-If a plan grows into several independent units of work, add a folder
-`{N}_{short-name}/` beside it with one file per unit, and turn the original file
-into an orchestrator. Names inside follow the same pattern, where `N` is the
-bug or phase number. Never duplicate content between an orchestrator and a
-sub-plan: each fact lives in one place.
+One plan is one flat Markdown file, directly in this directory. Do not create a
+folder for a plan, and do not split one into an orchestrator plus sub-plans;
+`.cursor/rules/plan-conventions.mdc` forbids nested trees and is applied to
+every session.
+
+If the work really is several independent units, write one numbered plan per
+unit and link them to each other. Each fact still lives in exactly one file, and
+the flat list stays the index — there is no second place to look.
 
 ---
 
@@ -76,9 +79,9 @@ but the required order is:
 3. **Changes** — a checklist, one line per file.
 4. **Details** — long reasoning, inside a collapsible `<details>` block.
 
-An orchestrator holds only the shared material: the status index, cross-cutting
-principles, the order of work, and how the units group into PRs. A sub-plan
-holds everything needed to implement one unit.
+One file holds everything needed to carry out that plan: the status of each
+item, the order of the work, and how it groups into PRs. Where a plan depends on
+another one, link to it instead of restating it.
 
 ### Evidence
 

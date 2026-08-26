@@ -111,9 +111,14 @@ Keep user-facing copy next to the case that produces it, as `Unavailable.message
 
 ### 1. Main-actor by default
 
-Every type that touches AppKit, SwiftUI, or `Store` is `@MainActor final class`: `AppDelegate`, `Store`, `LLMTranslator`, `Replacer`, `ReaderPanel`, `PreferencesController`, `Recorder`.
+Every class that owns app state or the lifetime of an AppKit object is `@MainActor final class`: `AppDelegate`, `Store`, `LLMTranslator`, `Replacer`, `ReaderPanel`, `PreferencesController`, `Recorder`.
 
-The single exception is `HotKeyCenter`. It is registered from a Carbon C callback that fires on an unspecified context, so it is a plain `final class` and hops back before calling app code:
+The rule is about isolating mutable state, not about turning every SwiftUI-adjacent type into a class. Two categories sit outside it deliberately, and converting them would be wrong:
+
+- **SwiftUI views** — `PreferencesView` and `ReaderHUDView` are `struct`s, as views must be. SwiftUI already isolates a `View` body to the main actor, so they get the guarantee without the annotation, even though both touch SwiftUI and `PreferencesView` holds `Store`.
+- **Static-only namespaces and value types** — `KeyDisplay`, `Languages`, `Lang`, `Store.Shortcut`. They carry no mutable state, so they need no isolation, even where they take an AppKit type as a parameter.
+
+Among the state-owning classes, the single exception is `HotKeyCenter`. It is registered from a Carbon C callback that fires on an unspecified context, so it is a plain `final class` and hops back before calling app code:
 
 ```swift
 DispatchQueue.main.async { HotKeyCenter.shared.fire(id) }
