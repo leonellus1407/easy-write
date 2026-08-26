@@ -39,7 +39,7 @@ Task { @MainActor in
 DispatchQueue.global().async { self.statusItem.button?.image = image }
 ```
 
-`HotKeyCenter` is the one non-isolated type: it is driven by a Carbon C callback and hops back with `DispatchQueue.main.async` before calling app code. Pure helpers may be `nonisolated static func`. Escaping closures that outlive the call capture `[weak self]`.
+`HotKeyCenter` is the one non-isolated class: it is driven by a Carbon C callback and hops back with `DispatchQueue.main.async` before calling app code. SwiftUI views are `struct`s and static-only namespaces (`KeyDisplay`, `Languages`) need no isolation, so neither belongs in that count. Pure helpers may be `nonisolated static func`. Escaping closures that outlive the call capture `[weak self]`.
 
 ### Long-running model calls race a timeout
 

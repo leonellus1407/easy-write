@@ -201,9 +201,11 @@ Point at the closest existing implementation instead of inventing a pattern:
 
 #### Maintainability
 
-- Diff budget: ≤50 added lines per file. A larger addition is a new file.
+- Diff budget: ≤50 added lines per Swift file. A larger addition is a new file.
+  (Swift sources only — see [`AI_WORKFLOW.md`](../conventions/AI_WORKFLOW.md#3-diff-size-budget).)
 - One primary type per file, named after it.
-- `@MainActor` for anything touching AppKit, SwiftUI, or `Store`.
+- `@MainActor` for every class that owns app state or an AppKit object. SwiftUI
+  views stay `struct`s.
 - No `try!`, no `fatalError`.
 
 #### Known Gotchas
