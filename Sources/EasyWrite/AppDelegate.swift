@@ -1,5 +1,6 @@
 import AppKit
 import ApplicationServices
+import EasyWriteCore
 import ServiceManagement
 
 @MainActor

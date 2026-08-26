@@ -1,4 +1,5 @@
 import AppKit
+import EasyWriteCore
 import SwiftUI
 
 /// Captures the next key combo for a given action (shortcut recorder).

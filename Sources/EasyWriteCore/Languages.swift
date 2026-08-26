@@ -1,17 +1,17 @@
 import Foundation
 
-struct Lang: Identifiable {
-    var id: String { code }
-    let code: String
-    let name: String
-    let formal: String?
-    let informal: String?
+public struct Lang: Identifiable {
+    public var id: String { code }
+    public let code: String
+    public let name: String
+    public let formal: String?
+    public let informal: String?
     /// Optional per-language guidance appended to the model instruction (e.g. dialect choice).
-    var note: String? = nil
+    public var note: String? = nil
 }
 
-enum Languages {
-    static let all: [Lang] = [
+public enum Languages {
+    public static let all: [Lang] = [
         Lang(code: "de", name: "German",     formal: "Sie",      informal: "du"),
         Lang(code: "fr", name: "French",     formal: "vous",     informal: "tu"),
         Lang(code: "es", name: "Spanish",    formal: "usted",    informal: "tú"),
@@ -28,5 +28,7 @@ enum Languages {
              note: "Use clear Modern Standard Arabic (الفصحى); do not mix in colloquial dialect."),
     ]
 
-    static func named(_ code: String) -> Lang { all.first { $0.code == code } ?? all[0] }
+    /// Falls back to the first language rather than returning nil, so a code persisted by an
+    /// older build (or a hand-edited default) still yields a usable target instead of failing.
+    public static func named(_ code: String) -> Lang { all.first { $0.code == code } ?? all[0] }
 }
