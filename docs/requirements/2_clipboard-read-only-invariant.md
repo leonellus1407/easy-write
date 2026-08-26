@@ -9,8 +9,9 @@
 After the popup translator ships, Easy Write reads the clipboard and never writes
 it — except in the one path behind the popover's **Copy** button. Two things are
 still missing at that point, and this document specifies them: five documents
-state the clipboard rule as repo law and all five describe the *old* mechanism,
-and nothing says what the popover declines to read.
+state the clipboard rule as repo law, across nine separate locations, and every
+one of them describes the *old* mechanism; and nothing says what the popover
+declines to read.
 
 **The v1.x defect this file originally described is resolved by deletion, not by a
 fix.** v1.x borrowed the pasteboard for a synthetic ⌘C and gave it back from
@@ -32,30 +33,68 @@ afterwards. This file stays under `docs/requirements/` rather than moving to
 use, and because it specifies a standing guarantee and a new read policy rather
 than a patch.
 
+## Open Questions in the Upstream Spec
+
+Two gaps in [`1_popup-translator.md`](1_popup-translator.md), recorded here
+because this document depends on it. **Neither is a work item owned by this
+file.** Both belong upstream and should be settled there before v2 is
+implemented; they are listed as inherited risk, not as scope.
+
+- **What happens to an edited left pane on reopen.** The upstream spec has
+  `togglePopup()` re-read the clipboard every time the popover opens, and it also
+  has an edit to the left pane trigger a retranslation. It does not say which of
+  those wins when the user edits the pane, closes the popover, and reopens it: as
+  written, the re-read silently overwrites the edit. That needs deciding upstream.
+- **`.cursor/rules/swift-code-standards.mdc` is absent from the upstream file
+  list.** The popup spec enumerates the documentation and packaging files its work
+  touches but omits that rule file, which states the clipboard rule at line 74 and
+  uses `ReaderPanel` as an example type at line 31 — and `ReaderPanel.swift` is
+  one of the files the popup spec deletes. Step 1 below covers line 74 as a
+  consequence; the stale example type, and the file's absence from the upstream
+  list, are covered nowhere.
+
 ## Technical Specification
 
 ### Components Affected
 
-Documentation — five files that state the clipboard rule as repo law and are
-**not** in the popup spec's own documentation list:
+Documentation — **five files, nine locations** that state or exemplify the
+snapshot-and-restore mechanism as repo law, and that are **not** in the popup
+spec's own documentation list. The list below is exhaustive as of this branch,
+established by grepping `docs/**`, `.cursor/**` and the root Markdown files for
+the whole concept (snapshot, restore, borrowed, pasteboard, clipboard) rather
+than for one phrasing:
 
-- `docs/requirements/0_TEMPLATE.md` (line 141) — the non-negotiable privacy gate
-  *"Clipboard snapshot-and-restore preserved on every path that touches the
-  pasteboard"*. The most consequential of the five, because the template is
-  copied into every future spec: left alone, it propagates a mandatory checkbox
-  about a mechanism that no longer exists.
-- `docs/plans/README.md` (line 25) — the cross-cutting invariant *"The clipboard
-  is snapshotted before a swap and restored after"*, which every plan touching
-  the clipboard must preserve.
-- `docs/conventions/CODING_CONVENTIONS.md` (lines 482, 520) — security convention
-  5, *"Clipboard is borrowed, not taken. Snapshot every pasteboard item and type
-  before a swap, restore afterwards"*, and the matching pre-commit checklist item.
-- `docs/conventions/AI_WORKFLOW.md` (lines 67, 167) — the PR checklist question
-  *"Is the clipboard snapshot/restore path still intact?"* and the section 6
-  prohibition *"Remove the clipboard snapshot/restore around a swap"*, which read
-  literally forbids the popup translator's own change.
-- `.cursor/rules/swift-code-standards.mdc` (line 74) — *"The clipboard is
-  snapshotted before a swap and restored after."*
+- `docs/requirements/0_TEMPLATE.md`
+  - **line 141** — the non-negotiable privacy gate *"Clipboard
+    snapshot-and-restore preserved on every path that touches the pasteboard"*.
+    The most consequential location of the nine, because the template is copied
+    into every future spec: left alone, it propagates a mandatory checkbox about
+    a mechanism that no longer exists.
+  - **line 123** — the edge case *"Target application is slow or handles copy
+    unusually → fails visibly, clipboard intact"*, which presumes a synthetic ⌘C
+    against a target application.
+- `docs/plans/README.md`
+  - **line 25** — the cross-cutting invariant *"The clipboard is snapshotted
+    before a swap and restored after | The user's clipboard is borrowed, never
+    taken"*, which every plan touching the clipboard must preserve.
+- `docs/conventions/CODING_CONVENTIONS.md`
+  - **line 164** — the delayed-closure guidance *"Use
+    `DispatchQueue.main.asyncAfter` for short UI delays (icon revert, clipboard
+    restore)"*. The pattern itself stays correct; the second example stops
+    naming anything real, since the clipboard restore was the 0.35 s
+    `asyncAfter` inside `Replacer`. Replace the example, not the rule.
+  - **line 482** — security convention 5, *"**Clipboard is borrowed, not taken.**
+    Snapshot every pasteboard item and type before a swap, restore afterwards"*.
+  - **line 520** — the matching pre-commit checklist item.
+- `docs/conventions/AI_WORKFLOW.md`
+  - **line 67** — the PR checklist question *"Is the clipboard snapshot/restore
+    path still intact?"*
+  - **line 167** — the section 6 prohibition *"Remove the clipboard
+    snapshot/restore around a swap"*, which read literally forbids the popup
+    translator's own change.
+- `.cursor/rules/swift-code-standards.mdc`
+  - **line 74** — *"The clipboard is snapshotted before a swap and restored
+    after."*
 
 Code:
 
@@ -70,10 +109,17 @@ Code:
 Already scheduled elsewhere, and therefore deliberately **not** in scope here:
 `SECURITY.md`, `README.md`, `HOW_IT_WORKS.md`, `docs/AI_Overview.md`,
 `docs/conventions/testing/README.md` and `.cursor/rules/project-conventions.mdc`
-are all listed in `1_popup-translator.md`, which also carries the acceptance
-criterion *"`SECURITY.md` is updated, because its current statements about
-`⌘C`/`⌘V`, clipboard restore, and Accessibility become false"*. Re-specifying
-them here would duplicate work that already has an owner.
+are all listed in [`1_popup-translator.md`](1_popup-translator.md), which also
+carries the acceptance criterion *"`SECURITY.md` is updated, because its current
+statements about `⌘C`/`⌘V`, clipboard restore, and Accessibility become false"*.
+Re-specifying them here would duplicate work that already has an owner.
+
+One caveat on that list: the upstream entry for
+`docs/conventions/testing/README.md` is scoped to *"the manual smoke test is
+rewritten around the popover"*, but section 2 of that file, *"Why the automatable
+surface is small"* (lines 39-43), also cites `ReaderPanel` and `Replacer` posting
+synthetic ⌘C/⌘V. Whoever rewrites the file should read all of it rather than only
+the smoke test.
 
 ### Settings & Persistence Changes
 
@@ -85,7 +131,7 @@ state is involved.
 
 #### Step 1: State the invariant where it is repo law
 
-Replace the snapshot-and-restore wording in all five documents with the guarantee
+Replace the snapshot-and-restore wording at all nine locations with the guarantee
 the code will then actually keep:
 
 > **Easy Write reads the pasteboard and never writes it, except in the single code
@@ -96,9 +142,22 @@ check. The v1.x rule required reasoning about control flow across every exit of 
 long method, which is why it stayed quietly false. The new rule is a count of call
 sites.
 
-The same five documents carry equally stale Accessibility statements, because v2
-requests no permission at all. Those lines sit next to these ones — fix both in
-the same pass, or record why not.
+`CODING_CONVENTIONS.md:164` is the one exception to that wording swap: it is a
+concurrency pattern rather than a promise, so it keeps its rule and loses only its
+second example.
+
+The same five files carry two further classes of staleness on adjacent lines,
+because v2 requests no permission at all and deletes two types. Fix them in the
+same pass, or record why not:
+
+- **Accessibility and `CGEvent`** — including the AppKit inventory at
+  `CODING_CONVENTIONS.md:329`, which lists `CGEvent` as part of the shell.
+- **Deleted types still cited as examples** — `Replacer` and `ReaderPanel` appear
+  as illustrations at `CODING_CONVENTIONS.md:99`, `114`, `176`, `179`, `181`,
+  `229`, `237`, `492`, at `AI_WORKFLOW.md:121`, at `0_TEMPLATE.md:177` and `198`,
+  and at `plans/README.md:95`. One further file is affected by this class alone
+  and by nothing else in this document: `docs/conventions/RELEASE_NOTES_GUIDE.md:24`
+  names `ReaderPanel` in its list of type names.
 
 #### Step 2: Make it mechanically checkable
 
@@ -115,7 +174,7 @@ whether the compile succeeded.
 
 #### Step 3: Decide what the popover refuses to read
 
-`1_popup-translator.md` specifies *when* the clipboard is read (on every open) and
+[`1_popup-translator.md`](1_popup-translator.md) specifies *when* the clipboard is read (on every open) and
 what happens when it holds nothing usable (empty panes, no model call; an image
 leaves the left pane empty). It does not specify what the popover declines to read
 when a string *is* available.
@@ -156,7 +215,8 @@ extension NSPasteboard.PasteboardType {
 
 ### Functional Requirements
 
-- [ ] All five documents state the read-only invariant; none still describes snapshot-and-restore
+- [ ] All nine locations listed under Components Affected state the read-only invariant, or lose their stale example; none still describes snapshot-and-restore
+- [ ] A repo-wide grep for the restore concept (snapshot, restore, borrowed, pasteboard, clipboard) across `docs/**`, `.cursor/**` and the root Markdown files returns no surviving description of the deleted mechanism
 - [ ] A spec written from `0_TEMPLATE.md` after v2 can complete its privacy checklist truthfully
 - [ ] Exactly one code path under `Sources/` writes the pasteboard, and it is behind the popover's **Copy** button
 - [ ] The grep guard fails a pull request that adds a second pasteboard write
@@ -193,12 +253,11 @@ Non-negotiable. Every box must be checked, or the work does not ship:
   and deliberately not retained here as history.
 - `SECURITY.md`, `README.md`, `HOW_IT_WORKS.md`, `docs/AI_Overview.md`,
   `docs/conventions/testing/README.md`, `.cursor/rules/project-conventions.mdc` —
-  all scheduled by `1_popup-translator.md`.
+  all scheduled by [`1_popup-translator.md`](1_popup-translator.md).
 - The popover itself: streaming, the cache, the language row, the hot-key.
-  `1_popup-translator.md` owns all of it.
-- Whether reopening the popover should overwrite an edited left pane. A real
-  ambiguity in the popup design, but a question about toggle semantics rather
-  than about the clipboard; it belongs in `1_popup-translator.md`.
+  [`1_popup-translator.md`](1_popup-translator.md) owns all of it.
+- Both items under "Open Questions in the Upstream Spec" above. They are recorded
+  so they are not lost, and they are owned upstream.
 - Adding the test target or the CI workflow. In flight on
   `ci/add-tests-and-workflow`; this document only adds one step to a workflow that
   exists by then.
