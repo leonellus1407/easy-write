@@ -5,8 +5,10 @@ import Testing
 struct TranslationCacheTests {
 
     private func key(_ text: String, source: String = "auto", target: String = "de",
-                     styleGuide: String = "") -> TranslationCache.Key {
-        .init(text: text, sourceCode: source, targetCode: target, styleGuide: styleGuide)
+                     styleGuide: String = "",
+                     engine: Engine = .intelligence) -> TranslationCache.Key {
+        .init(text: text, sourceCode: source, targetCode: target, styleGuide: styleGuide,
+              engine: engine)
     }
 
     @Test("given a stored translation, when the same request arrives again, then the cached text comes back")
@@ -27,6 +29,17 @@ struct TranslationCacheTests {
         #expect(cache.value(for: key("Good morning", styleGuide: "Be brief.")) == nil)
         #expect(cache.value(for: key("Good morning", source: "en")) == nil)
         #expect(cache.value(for: key("Good morning", target: "fr")) == nil)
+    }
+
+    @Test("given a translation stored by one engine, when the other engine is chosen, then the request misses")
+    func theEngineIsPartOfTheKey() {
+        let cache = TranslationCache()
+        cache.store("Guten Morgen", for: key("Good morning"))
+
+        // The two engines word the same sentence differently, so switching between them must never
+        // be answered with the other one's result.
+        #expect(cache.value(for: key("Good morning", engine: .translate)) == nil)
+        #expect(cache.value(for: key("Good morning")) == "Guten Morgen")
     }
 
     @Test("given a full cache, when one more translation is stored, then the least recently used one is dropped")

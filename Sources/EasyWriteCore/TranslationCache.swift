@@ -13,12 +13,18 @@ public final class TranslationCache {
         public let sourceCode: String
         public let targetCode: String
         public let styleGuide: String
+        /// Two engines word the same sentence differently, so switching between them must not be
+        /// answered with the other one's result. The style guide stays in the key even though only
+        /// one engine reads it, for the same reason.
+        public let engine: Engine
 
-        public init(text: String, sourceCode: String, targetCode: String, styleGuide: String) {
+        public init(text: String, sourceCode: String, targetCode: String, styleGuide: String,
+                    engine: Engine) {
             self.text = text
             self.sourceCode = sourceCode
             self.targetCode = targetCode
             self.styleGuide = styleGuide
+            self.engine = engine
         }
     }
 

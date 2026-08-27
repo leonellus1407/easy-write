@@ -5,8 +5,7 @@ import Foundation
 /// Streaming translation using Apple's on-device model.
 /// Fully local: no accounts, no network, nothing leaves the Mac.
 @MainActor
-final class LLMTranslator {
-    struct TimeoutError: Error {}
+final class LLMTranslator: TranslationEngine {
 
     // Permissive guardrails: the default safety filter false-flags ordinary text for
     // translation (a content-transformation task). Apple provides this mode for exactly that.
@@ -45,7 +44,9 @@ final class LLMTranslator {
         }
     }
 
-    var unavailableReason: Unavailable? {
+    var unavailableReason: String? { unavailable?.message }
+
+    private var unavailable: Unavailable? {
         switch model.availability {
         case .available:
             return nil

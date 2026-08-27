@@ -1,3 +1,4 @@
+import EasyWriteCore
 import Foundation
 import SwiftUI
 
@@ -19,6 +20,9 @@ final class Store: ObservableObject {
     @Published var sourceCode: String { didSet { d.set(sourceCode, forKey: "sourceLanguageCode") } }
     @Published var targetCode: String { didSet { d.set(targetCode, forKey: "targetLanguageCode") } }
     @Published var styleGuide: String { didSet { d.set(styleGuide, forKey: "styleGuide") } }
+    /// No `onChange?()`: the popover is transient, so opening Preferences dismisses it and the
+    /// next open reads this afresh.
+    @Published var engine: String { didSet { d.set(engine, forKey: "translationEngine") } }
     @Published var ignoresPrivateClipboard: Bool {
         didSet { d.set(ignoresPrivateClipboard, forKey: "ignoresPrivateClipboard") }
     }
@@ -28,6 +32,8 @@ final class Store: ObservableObject {
         sourceCode = d.string(forKey: "sourceLanguageCode") ?? "auto"
         targetCode = d.string(forKey: "targetLanguageCode") ?? "de"
         styleGuide = d.string(forKey: "styleGuide") ?? ""
+        // Absent for everyone upgrading, so they keep the engine they already had.
+        engine = d.string(forKey: "translationEngine") ?? Engine.intelligence.rawValue
         // Defaults to on, so a fresh install protects a copied password without being asked.
         ignoresPrivateClipboard = d.object(forKey: "ignoresPrivateClipboard") as? Bool ?? true
         if let data = d.data(forKey: "shortcuts"),

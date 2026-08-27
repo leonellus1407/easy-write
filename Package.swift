@@ -3,7 +3,9 @@ import PackageDescription
 
 let package = Package(
     name: "EasyWrite",
-    platforms: [.macOS("26.0")],
+    // 26.4 is what Apple Translate needs: TranslationSession.Strategy and the initializer that
+    // takes one are gated there, while the rest of the framework is 26.0.
+    platforms: [.macOS("26.4")],
     targets: [
         // Pure value logic, deliberately free of AppKit and FoundationModels so it can be
         // unit tested without a running NSApplication or Apple Intelligence.

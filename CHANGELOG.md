@@ -2,6 +2,47 @@
 
 All notable changes to Easy Write are documented here.
 
+## [2.1] — 2026-08-27
+
+### Added
+- **A second translator to choose from.** Preferences now offers Apple Translate — the engine behind
+  the system Translate app — beside the Apple Intelligence model that Easy Write has always used. The
+  model still wins when you want your own wording, because it is the only one that can read your
+  style guide. Apple Translate is steadier on longer sentences, usually faster, and works on a Mac
+  where Apple Intelligence is switched off or unavailable. Apple Intelligence stays selected unless
+  you change it, so nothing moves under you.
+- **A language list that says what is ready.** With Apple Translate selected, Preferences lists every
+  language Easy Write offers, whether its pack is already on your Mac, and a Download button when it
+  is not. Languages the engine does not cover are listed as unsupported rather than quietly left out.
+- **Failures that name the problem.** A pair that has not been downloaded, a pair the engine cannot
+  do at all, and text it could not identify each get their own explanation in the popover, with what
+  to do about it — instead of one "try again" line covering everything.
+
+### Changed
+- **The style guide applies to Apple Intelligence only,** and Preferences now says so where you type
+  it. Apple Translate takes no instructions of any kind. Your text is kept either way, so switching
+  back costs you nothing.
+- **Switching engines re-translates rather than repeating the other one's answer.** The two word the
+  same sentence differently, and reopening on text you already translated shows the engine you are
+  actually using.
+- **With Apple Translate the translation appears in one piece** instead of arriving word by word. The
+  spinner and the stopwatch cover the wait, and nothing else about the popover changes.
+- **Easy Write now needs macOS 26.4,** up from 26.0. That is the version Apple Translate's
+  higher-quality mode arrives in, and it is the mode worth having for text a person reads.
+
+### Fixed
+- **Opening Preferences now closes the translator popover.** It used to stay on screen, floating over
+  the Preferences window. Clicking away from the popover, in any application, hides it too.
+
+### Notes
+- Choosing Apple Translate can make macOS download a language pack, which is the one moment anything
+  in this workflow touches the network — and it is the system fetching it after asking you, not the
+  app. Easy Write still contains no network code. Once a pack is on your Mac, translating with it is
+  entirely offline. See [SECURITY.md](SECURITY.md).
+- Neither engine is better at everything. On "Can you send me the report tomorrow?" into Russian, the
+  model produced a broken sentence while Apple Translate got it right; on text where you have pinned
+  your own terms, only the model can use them. That is why this is a setting and not a replacement.
+
 ## [2.0] — 2026-08-27
 
 Easy Write is a translator now, not a rewriter. It reads what you copied and shows the translation in

@@ -38,4 +38,8 @@ public enum Languages {
 
     /// Resolves a stored source code, where `auto` is a legitimate answer rather than a miss.
     public static func source(_ code: String) -> Lang { code == auto.code ? auto : named(code) }
+
+    /// The English name for a code that need not be one we list — auto-detect can resolve to any
+    /// language the recogniser knows. Falls back to the code rather than to a wrong name.
+    public static func name(of code: String) -> String { all.first { $0.code == code }?.name ?? code }
 }

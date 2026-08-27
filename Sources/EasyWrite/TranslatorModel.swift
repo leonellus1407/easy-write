@@ -47,6 +47,7 @@ final class TranslatorModel: ObservableObject {
 
     private static let debounce = Duration.milliseconds(300)
     private let llm: LLMTranslator
+    private lazy var apple = AppleTranslator()
     private let cache = TranslationCache()
     private var task: Task<Void, Never>?
     /// Bumped for every request so a superseded one cannot write over a newer one's state.
@@ -64,6 +65,18 @@ final class TranslatorModel: ObservableObject {
 
     private var source: Lang { Languages.source(sourceCode) }
     private var target: Lang { Languages.named(targetCode) }
+
+    private var chosenEngine: Engine { Engine.named(Store.shared.engine) }
+
+    /// Resolved once per run, so changing the engine in Preferences takes effect on the next open
+    /// with nothing to re-register. The switch is exhaustive, so a third engine would be a compile
+    /// error here rather than a silent fallback.
+    private var engine: TranslationEngine {
+        switch chosenEngine {
+        case .intelligence: return llm
+        case .translate:    return apple
+        }
+    }
 
     // MARK: Actions
     /// Fills the left pane from the clipboard and translates. The clipboard is re-read only when
@@ -103,7 +116,7 @@ final class TranslatorModel: ObservableObject {
     }
 
     func prewarm() {
-        llm.prewarm(from: source, to: target, styleGuide: Store.shared.styleGuide)
+        engine.prewarm(from: source, to: target, styleGuide: Store.shared.styleGuide)
     }
 
     // MARK: Translation
@@ -126,7 +139,8 @@ final class TranslatorModel: ObservableObject {
     private func run(_ mine: Int) async {
         let text = trimmedInput
         guard !text.isEmpty else { clearResult(); setPhase(.idle); return }
-        if let reason = llm.unavailableReason { clearResult(); setPhase(.failed(reason.message)); return }
+        let engine = self.engine
+        if let reason = engine.unavailableReason { clearResult(); setPhase(.failed(reason)); return }
 
         let key = key(for: text)
         if let cached = cache.value(for: key) {
@@ -143,8 +157,8 @@ final class TranslatorModel: ObservableObject {
         let styleGuide = Store.shared.styleGuide
         do {
             var latest = ""
-            for try await snapshot in llm.translate(text, from: source, to: target,
-                                                    styleGuide: styleGuide) {
+            for try await snapshot in engine.translate(text, from: source, to: target,
+                                                       styleGuide: styleGuide) {
                 guard mine == generation else { return }
                 latest = snapshot
                 output = snapshot
@@ -152,16 +166,21 @@ final class TranslatorModel: ObservableObject {
             guard mine == generation else { return }
             stopTiming()
             guard !latest.isEmpty else {
-                setPhase(.failed("The model returned nothing. Try again."))
+                setPhase(.failed("The translation came back empty. Try again."))
                 return
             }
             cache.store(latest, for: key)
             setPhase(.idle)
-            llm.prewarm(from: source, to: target, styleGuide: styleGuide)
-        } catch is LLMTranslator.TimeoutError {
+            engine.prewarm(from: source, to: target, styleGuide: styleGuide)
+        } catch is TimeoutError {
             guard mine == generation else { return }
             stopTiming()
             setPhase(.failed("The translation took too long and was stopped. Try again."))
+        } catch let failure as EngineFailure {
+            // The engine already knows why, and its reason is more useful than "try again".
+            guard mine == generation else { return }
+            stopTiming()
+            setPhase(.failed(failure.message))
         } catch {
             guard mine == generation else { return }
             stopTiming()
@@ -192,6 +211,6 @@ final class TranslatorModel: ObservableObject {
 
     private func key(for text: String) -> TranslationCache.Key {
         .init(text: text, sourceCode: sourceCode, targetCode: targetCode,
-              styleGuide: Store.shared.styleGuide)
+              styleGuide: Store.shared.styleGuide, engine: chosenEngine)
     }
 }

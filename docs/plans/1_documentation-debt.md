@@ -25,6 +25,8 @@
 - [ ] Pull request #4 body — its instruction-length table implies shortening the instruction bought latency; measurement says it bought nothing
 - [ ] `docs/requirements/1_popup-translator.md` and `docs/AI_Overview.md` — both justify greedy sampling by determinism and decode cost; the real reason is accuracy, measured below
 - [ ] `docs/AI_Overview.md` — states the style guide is the lever for word choice; it is global while the target language is per-translation, so it cannot carry a glossary
+- [ ] `README.md`, `HOW_IT_WORKS.md`, `docs/AI_Overview.md` — all three describe one translation engine; 2.1 ships two, so the engine, the language packs and the 26.4 floor need a pass
+- [ ] `docs/conventions/testing/README.md` — the eight-phrase benchmark now has two engines to record, and the suite count moved from nine tests to fourteen
 - [ ] Open question: whether the prompt benchmark harness belongs in the repo rather than in `/tmp`
 
 ## Details
