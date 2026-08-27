@@ -30,6 +30,8 @@ write and read in more than one language.
 
 ---
 
+![Easy Write popover translation walkthrough](docs/demo.gif)
+
 ## Why Easy Write?
 
 If you write emails, messages, or docs in a language that isn't your first, you're stuck in a loop:

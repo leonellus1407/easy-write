@@ -54,7 +54,7 @@ them when reorganising this tree.
 
 | File | Used for |
 |---|---|
-| `demo.gif` | Nothing, currently. It animates version 1's in-place replacement, which the app no longer does, so the README stopped embedding it rather than ship a false demo. A recording of the popover is needed to replace it ([#6](https://github.com/leonellus1407/easy-write/issues/6)) |
+| `demo.gif` | The synthetic popover translation walkthrough embedded in the root README |
 | `icon.png` | The app icon shown in the README header |
 | `social-preview.jpg` | The GitHub repository social preview card |
 

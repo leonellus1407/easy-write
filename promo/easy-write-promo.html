@@ -110,6 +110,11 @@
     background: rgba(255,255,255,.08); border: 1px solid rgba(255,255,255,.10);
   }
   .fBtn.accent { background: rgba(124,92,255,.62); border-color: rgba(255,255,255,.24); color: #fff; }
+  #pointer {
+    position: absolute; z-index: 7; width: 30px; height: 30px; opacity: 0;
+    border: 4px solid #fff; border-radius: 50%; background: rgba(124,92,255,.8);
+    box-shadow: 0 5px 18px rgba(0,0,0,.45); pointer-events: none;
+  }
 
   /* Title zone sits between the popover and the editor, so neither ever has a caption
      sitting on top of it. */
@@ -190,8 +195,9 @@
     <div id="app">
       <div class="topTitle" id="t1"><span>Copy in any app</span></div>
       <div class="topTitle" id="t2"><span>Press one shortcut</span></div>
-      <div class="topTitle" id="t3"><span>Translated at the menu bar</span></div>
-      <div class="topTitle" id="t4"><span>The AI is already in your Mac</span></div>
+      <div class="topTitle" id="t3"><span>Watch the translation stream</span></div>
+      <div class="topTitle" id="t4"><span>Change the language</span></div>
+      <div class="topTitle" id="t5"><span>Copy the result</span></div>
 
       <div id="editor">
         <div id="titlebar"><div class="dot r"></div><div class="dot y"></div><div class="dot g"></div></div>
@@ -212,7 +218,7 @@
       <div id="langRow">
         <div class="picker"><span>Auto-detect</span><span class="chev">&#9662;</span></div>
         <div class="roundBtn">&#8646;</div>
-        <div class="picker"><span>German</span><span class="chev">&#9662;</span></div>
+        <div class="picker" id="targetPicker"><span id="targetName">German</span><span class="chev">&#9662;</span></div>
         <div class="roundBtn">&#9881;</div>
       </div>
       <div id="panes">
@@ -223,10 +229,11 @@
         <span id="clockOut">0.00 s</span>
         <div id="footBtns">
           <div class="fBtn">Retranslate</div>
-          <div class="fBtn accent">Copy</div>
+          <div class="fBtn accent" id="copyBtn">Copy</div>
         </div>
       </div>
     </div>
+    <div id="pointer"></div>
 
     <div class="scrim" id="introScrim"></div>
     <div id="titleCard">
@@ -247,7 +254,8 @@
 <script>
   const EN = "Text me when you land.";
   const DE = "Schreib mir, wenn du ankommst.";
-  const LOOP = 14.6;
+  const FR = "Écris-moi quand tu atterris.";
+  const LOOP = 15.2;
 
   const enText   = document.getElementById('enText');
   const caret    = document.getElementById('caret');
@@ -257,6 +265,10 @@
   const clockOut = document.getElementById('clockOut');
   const popover  = document.getElementById('popover');
   const statusItem = document.getElementById('statusItem');
+  const targetPicker = document.getElementById('targetPicker');
+  const targetName = document.getElementById('targetName');
+  const copyBtn = document.getElementById('copyBtn');
+  const pointer = document.getElementById('pointer');
 
   const clamp = (v,a,b) => Math.min(b, Math.max(a, v));
   const ease  = t => t<.5 ? 2*t*t : 1-Math.pow(-2*t+2,2)/2;
@@ -265,9 +277,10 @@
   const op = (id,o) => document.getElementById(id).style.opacity = o;
 
   // Beats, in seconds. Kept here rather than inline so the whole rhythm reads at once.
-  const TYPE = [2.50, 4.00], SELECT = 4.15, PRESS = 5.15, OPEN = 5.45, STREAM = [5.95, 7.65];
-  // The stopwatch is what the app really shows, so it ends on a time the app really produces.
-  const FINAL = 0.86;
+  const TYPE = [2.20, 3.40], SELECT = 3.48, COPY = 4.05, PRESS = 5.25, OPEN = 5.55;
+  const STREAM_DE = [6.05, 7.55], PICK = 8.60, STREAM_FR = [9.00, 10.35], COPY_RESULT = 11.15;
+  // The stopwatch uses representative times from the app's real output.
+  const FINAL_DE = 0.86, FINAL_FR = 0.74;
 
   function render(t){
     // Intro (hold ~1.3s so the brand registers)
@@ -278,24 +291,30 @@
     tc.style.transform = `scale(${0.98 + 0.02*ease(clamp(t/0.7,0,1))})`;
 
     // Editor
-    op('editor', win(t, 1.90, 11.00, 0.4, 0.4));
+    op('editor', win(t, 1.65, 12.00, 0.4, 0.4));
 
     // Titles (each held long enough to read comfortably)
-    op('t1', win(t, 2.15, 4.30, 0.40, 0.30));
-    op('t2', win(t, 4.40, 6.00, 0.30, 0.30));
-    op('t3', win(t, 6.20, 8.30, 0.30, 0.35));
-    op('t4', win(t, 8.40, 11.00, 0.40, 0.35));
+    op('t1', win(t, 1.90, 4.35, 0.35, 0.25));
+    op('t2', win(t, 4.45, 5.90, 0.25, 0.25));
+    op('t3', win(t, 6.00, 7.90, 0.25, 0.25));
+    op('t4', win(t, 8.05, 10.55, 0.25, 0.25));
+    op('t5', win(t, 10.65, 11.85, 0.25, 0.25));
 
-    // Typing, then the selection that stands in for ⌘C
+    // Type and select harmless sample copy in the synthetic editor.
     const p = clamp((t-TYPE[0])/(TYPE[1]-TYPE[0]), 0, 1);
     enText.textContent = EN.slice(0, Math.round(p*EN.length));
     caret.style.opacity = (t>TYPE[0]-0.1 && t<SELECT && Math.floor(t/0.53)%2===0) ? 1 : 0;
-    const sel = clamp((t-SELECT)/0.45, 0, 1) * (t < 11.0 ? 1 : 0);
+    const sel = clamp((t-SELECT)/0.35, 0, 1) * (t < 5.55 ? 1 : 0);
     enText.style.background = `rgba(124,92,255,${0.55*sel})`;
 
-    // Keys, pressed at 5.15
-    op('keys', win(t, 4.50, 6.05, 0.35, 0.30));
-    const press = clamp(1 - Math.abs(t-PRESS)/0.18, 0, 1);
+    // Show ⌘C first, then the app's global shortcut.
+    op('keys', Math.max(win(t, 3.65, 4.38, 0.20, 0.18), win(t, 4.55, 5.75, 0.22, 0.20)));
+    const copying = t < 4.45;
+    document.getElementById('k1').textContent = copying ? '⌘' : '⇧';
+    document.getElementById('k2').textContent = copying ? 'C' : '⌃';
+    document.getElementById('k3').style.display = copying ? 'none' : 'flex';
+    const keyBeat = copying ? COPY : PRESS;
+    const press = clamp(1 - Math.abs(t-keyBeat)/0.18, 0, 1);
     ['k1','k2','k3'].forEach(id=>{
       const el = document.getElementById(id);
       el.style.transform = `scale(${1-0.06*press})`;
@@ -305,26 +324,39 @@
     });
 
     // The popover grows out of the status item, which lights up while it is open
-    const shown = win(t, OPEN, 11.05, 0.30, 0.30);
+    const shown = win(t, OPEN, 12.05, 0.30, 0.30);
     popover.style.opacity = shown;
     popover.style.transform = `scale(${0.94 + 0.06*shown})`;
     statusItem.style.background = `rgba(0,0,0,${0.14*shown})`;
 
-    // Left pane is what was copied; right pane streams in, as the model writes it
+    // The copied text stays on the left while each target streams on the right.
     paneIn.textContent = shown > 0 ? EN : "";
-    const s = clamp((t-STREAM[0])/(STREAM[1]-STREAM[0]), 0, 1);
-    outText.textContent = DE.slice(0, Math.round(s*DE.length));
+    const switched = t >= PICK;
+    const stream = switched ? STREAM_FR : STREAM_DE;
+    const translation = switched ? FR : DE;
+    const finalTime = switched ? FINAL_FR : FINAL_DE;
+    const s = clamp((t-stream[0])/(stream[1]-stream[0]), 0, 1);
+    targetName.textContent = switched ? "French" : "German";
+    outText.textContent = translation.slice(0, Math.round(s*translation.length));
     outCaret.style.opacity = (shown > 0 && s > 0 && s < 1) ? 1 : 0;
-    clockOut.textContent = (shown > 0 ? (s*FINAL).toFixed(2) : "0.00") + " s";
+    clockOut.textContent = (shown > 0 ? (s*finalTime).toFixed(2) : "0.00") + " s";
 
-    // Pills (staggered), fade out before end card
-    const fo = clamp((10.95 - t)/0.3, 0, 1);
-    op('p1', Math.min(win(t, 8.60, 99, 0.3, 99), fo));
-    op('p2', Math.min(win(t, 8.82, 99, 0.3, 99), fo));
-    op('p3', Math.min(win(t, 9.04, 99, 0.3, 99), fo));
+    // A synthetic pointer makes the language change and Copy action explicit.
+    const targetClick = win(t, 8.18, 8.88, 0.22, 0.22);
+    const copyClick = win(t, 10.78, 11.48, 0.22, 0.22);
+    pointer.style.opacity = Math.max(targetClick, copyClick);
+    pointer.style.left = (targetClick >= copyClick ? 800 : 939) + "px";
+    pointer.style.top = (targetClick >= copyClick ? 111 : 487) + "px";
+    const targetPress = clamp(1 - Math.abs(t-PICK)/0.20, 0, 1);
+    const copyPress = clamp(1 - Math.abs(t-COPY_RESULT)/0.20, 0, 1);
+    targetPicker.style.background = `rgba(124,92,255,${0.07 + 0.42*targetPress})`;
+    copyBtn.style.transform = `scale(${1 - 0.07*copyPress})`;
+    copyBtn.style.background = `rgba(124,92,255,${0.62 + 0.30*copyPress})`;
 
-    // End card (holds ~3s)
-    const end = win(t, 11.10, LOOP, 0.5, 0.001);
+    op('p1', 0); op('p2', 0); op('p3', 0);
+
+    // End card.
+    const end = win(t, 12.10, LOOP, 0.5, 0.001);
     op('endScrim', end); op('endCard', end);
   }
 
@@ -337,9 +369,14 @@
   }
   window.addEventListener('resize', fit); fit();
 
-  let t0=null;
-  function frame(now){ if(t0===null)t0=now; render(((now-t0)/1000)%LOOP); requestAnimationFrame(frame); }
-  requestAnimationFrame(frame);
+  const fixedTime = new URLSearchParams(location.search).get('time');
+  if (fixedTime !== null && Number.isFinite(Number(fixedTime))) {
+    render(Number(fixedTime));
+  } else {
+    let t0=null;
+    function frame(now){ if(t0===null)t0=now; render(((now-t0)/1000)%LOOP); requestAnimationFrame(frame); }
+    requestAnimationFrame(frame);
+  }
 </script>
 </body>
 </html>
