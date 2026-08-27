@@ -36,10 +36,11 @@ struct LanguagePackList: View {
         // `init(installedSource:)` refuses a pair that is not installed, so a download cannot be
         // started from plain code in exactly the case where it is needed. This is the way in.
         .translationTask(download) { session in
-            guard session.canRequestDownloads else {
-                await MainActor.run { downloadsRefused = true }
-                return
-            }
+            // Whether macOS will take the request is answered per session, so the warning is set
+            // and cleared on every attempt rather than latching on the first refusal.
+            let allowed = session.canRequestDownloads
+            await MainActor.run { downloadsRefused = !allowed }
+            guard allowed else { return }
             try? await session.prepareTranslation()
             await load()
         }
