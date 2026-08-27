@@ -357,10 +357,16 @@ Speed is the headline requirement, in rough order of effect:
   bare "output only the translation", though, makes the model echo the source text
   back untranslated — four of eight benchmark phrases, none once the language is
   named again at the end. Whatever the instruction says, that closing line stays.
-- **`GenerationOptions(sampling: .greedy)`.** The cheapest decode path, and
-  determinism is what makes a cache trustworthy. `maximumResponseTokens` is a
-  runaway guard only, scaled to input length — Apple's TN3193 warns it truncates
-  hard rather than shortening gracefully.
+- **`GenerationOptions(sampling: .greedy)`.** Chosen for accuracy, not for decode
+  cost. Over eight phrases sampled three times each and scored on whether the
+  facts that must survive a translation did, greedy passed 18 of 24 runs against
+  8 to 14 for every sampled alternative, and none of them was faster — see the
+  table in [`testing/README.md`](../conventions/testing/README.md). Determinism
+  follows for free and is what makes a cache trustworthy; it also means
+  `retranslate()` cannot offer a better wording, only a fresh attempt after a
+  failure or a style-guide edit. `maximumResponseTokens` is a runaway guard only,
+  scaled to input length — Apple's TN3193 warns it truncates hard rather than
+  shortening gracefully.
 - **Cache and debounce.** A repeat costs nothing; an edit costs one run, not one
   per keystroke.
 

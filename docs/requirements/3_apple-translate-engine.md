@@ -34,9 +34,9 @@ Modified:
 - `Info.plist` — `LSMinimumSystemVersion` to match `Package.swift`, and a version bump
 - `CHANGELOG.md` — release entry
 
-Documentation is deliberately left out of this list. It is tracked in
-[`docs/plans/1_documentation-debt.md`](../plans/1_documentation-debt.md) and updated in one pass, not
-per experiment.
+Documentation is deliberately left out of this list. The prompt and the popover were still being tuned
+while this shipped, so the `.md` files were deferred and then updated in one pass rather than once per
+experiment.
 
 ### Settings & Persistence Changes
 
@@ -245,8 +245,10 @@ Non-negotiable. Every box must be checked, or the feature does not ship:
   which no part of the popover needs yet
 - `.lowLatency` as a user-visible choice. `.highFidelity` is the right default and a second knob for a
   difference nobody asked about is not worth the surface
-- Using `tokenCount(for:)` to catch over-long input before calling the model. Worth doing, unrelated to
-  this feature, and listed in [`docs/plans/1_documentation-debt.md`](../plans/1_documentation-debt.md)
+- Using `tokenCount(for:)` to catch over-long input before calling the model. Worth doing and
+  unrelated to this feature: a clipboard of a few thousand characters exceeds the model's 4096-token
+  context and reports a generic "didn't finish" message rather than saying so. Pre-existing — v1 had
+  the same ceiling. Tracked in [#8](https://github.com/leonellus1407/easy-write/issues/8)
 
 ## Development Information
 
@@ -334,7 +336,6 @@ model measurably struggles on some of those phrases. Record both columns.
 - [Coding conventions](../conventions/CODING_CONVENTIONS.md) — style, naming, concurrency, settings
 - [AI workflow](../conventions/AI_WORKFLOW.md) — guardrails and the PR checklist
 - [Testing guide](../conventions/testing/README.md) — the eight-phrase benchmark and what measuring has settled
-- [Documentation debt](../plans/1_documentation-debt.md) — where the deferred `.md` edits are parked
 - [Popover translator](1_popup-translator.md) — the surface this engine plugs into
 - [Clipboard read-only invariant](2_clipboard-read-only-invariant.md) — the promise both engines keep
 - [Security & privacy](../../SECURITY.md) — the page the pack download makes incomplete

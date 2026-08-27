@@ -12,10 +12,16 @@ Easy Write is a native macOS menu-bar utility that translates whatever text is o
 shows the result in a popover anchored to its status-bar icon. It runs as a background agent: no Dock
 icon, no main window, one global keyboard shortcut.
 
-The problem it solves is the copy-paste round trip to a web translator. Translation is performed by
-Apple's on-device foundation model, which is part of Apple Intelligence. This is a defining property
-of the project, not an implementation detail: there is no network code anywhere in the app, no
-accounts, no API keys, and no server component. Contributions are expected to preserve that.
+The problem it solves is the copy-paste round trip to a web translator. Translation is performed
+on-device by one of two engines the user picks between: Apple's foundation model, which is part of
+Apple Intelligence and is the default, or Apple's dedicated translation framework. This is a defining
+property of the project, not an implementation detail: there is no network code anywhere in the app,
+no accounts, no API keys, and no server component. Contributions are expected to preserve that.
+
+One thing does reach the network, and the distinction matters enough to state rather than gloss:
+choosing a language pair the translation framework has not downloaded makes *macOS* offer to fetch a
+language pack. The system asks the user, downloads it, and shares it system-wide. The app still
+contains no network code, and translating with an installed pack is entirely offline.
 
 Two invariants shape almost every design decision in the app, and both are stronger than they look:
 
@@ -44,9 +50,17 @@ forces a fresh run even when a cached answer exists.
 that writes the clipboard.
 
 **Configuration.** A gear menu inside the popover holds the app version, Preferences, a launch-at-login
-toggle and Quit. The Preferences window holds a free-text personal style guide, the rebindable
-shortcut, and a checkbox controlling whether clipboard content that its source marked private is read
-at all.
+toggle and Quit. The Preferences window holds the engine choice, a free-text personal style guide, the
+rebindable shortcut, and a checkbox controlling whether clipboard content that its source marked
+private is read at all. With the translation framework selected it also lists every supported
+language, whether its pack is installed, and a control that downloads one that is not.
+
+**Choosing an engine.** The two are good at different things, so the choice is the user's rather than
+the app's, and Preferences states the trade instead of leaving it to be discovered. The model reads
+instructions, so it is the only one that can honour a style guide, and it writes its answer word by
+word. The translation framework takes no instructions at all and answers in one piece, but it is
+steadier on long sentences and runs on a Mac where Apple Intelligence is off. Neither is a
+replacement for the other, which is why nothing falls back automatically.
 
 **Status feedback.** Progress lives in the popover: a spinner while the model runs, and a failure
 message in the right-hand pane when something goes wrong. The status icon also changes while a
@@ -125,10 +139,18 @@ afterwards so its own write is not mistaken for new clipboard content on the nex
 
 ### The translation path
 
-`LLMTranslator` is the only component that talks to the model. It uses Apple's FoundationModels
-framework — the on-device large language model — rather than a dedicated translation API, because a
-user-supplied style guide can be expressed as an instruction to a language model but not to a
-dictionary-style translator.
+A single protocol is what keeps two very different engines from becoming a branch in five places.
+It declares three things — why the engine cannot run at all, a prewarm, and a translate call that
+returns a stream of cumulative snapshots — and the popover model consumes only that. The setting is
+resolved to an engine in exactly one place, by an exhaustive switch, so a third engine would be a
+compile error there rather than a silent fallback. If a conditional on the engine name appears
+anywhere else, the abstraction is in the wrong shape.
+
+The stream shape fits both because one engine yields many snapshots and the other yields exactly one.
+The engine is also part of the cache key, since the two word the same sentence differently and
+switching between them must never be answered out of the other's cache.
+
+#### The model engine
 
 Each request builds an instruction from the source and target language, an optional per-language note
 carried by the language table, and the user's optional style guide, which is appended last and told to
@@ -142,14 +164,21 @@ source text back untranslated — four of eight benchmark phrases, against none 
 named again at the end. And **length costs almost nothing**: going from 36 words to 200 did not move
 the time to first token, so shortening it is not a latency lever.
 
-The public call returns a stream of cumulative snapshots. Three things make it fast: streaming, so the
-user reads the first words instead of waiting for the whole answer; greedy sampling, which is the
-cheapest decode path and makes the same input produce the same output, which is what makes the cache
-trustworthy; and genuine session reuse. That last one matters most. A session can be warmed ahead of
-time, but only for one specific instruction string, and a session is stateful — its transcript grows
-if it is reused across turns. So exactly one warm session is kept, spent on the next translation, and
-rebuilt afterwards. Measured on an M-series Mac that is the difference between a first token at 2.4
-seconds and at 0.25 seconds.
+Two things make it fast. Streaming, so the user reads the first words instead of waiting for the whole
+answer; and genuine session reuse, which matters most. A session can be warmed ahead of time, but only
+for one specific instruction string, and a session is stateful — its transcript grows if it is reused
+across turns. So exactly one warm session is kept, spent on the next translation, and rebuilt
+afterwards. Measured on an M-series Mac that is the difference between a first token at 2.4 seconds
+and at 0.25 seconds.
+
+Decoding is greedy, and **the reason is accuracy rather than decode cost**. Measured over eight
+phrases sampled three times each and scored on whether the facts that must survive a translation did,
+greedy passed 18 of 24 runs while every sampled alternative landed between 8 and 14, and none of them
+was faster. There is usually one right continuation in a translation, so on a model this size
+sampling mostly finds worse ones. Determinism follows for free, and it is what makes the cache
+trustworthy — but it also means a re-run on unchanged input is identical, so the retranslate button
+cannot offer a better alternative. It is for retrying after a failure and for picking up a style guide
+edited while the popover was open.
 
 Two forms of resilience are built in. Generation races a timeout so a stalled model can never wedge
 the app, and a transient failure is retried once — but only while nothing has been emitted yet, since
@@ -162,6 +191,26 @@ Apple Intelligence being switched off, and the model still downloading in the ba
 distinction matters in practice: the last case is common right after a user first enables Apple
 Intelligence, and a generic "turn it on" message is actively misleading there. The reason is shown in
 the popover, not in a dialog.
+
+#### The translation-framework engine
+
+Simpler in almost every way, and awkward in four. Its session demands a concrete source language that
+is already installed, so auto-detect has to be resolved before a session exists — an on-device
+recogniser does that, and the engine says it could not identify the text rather than guessing. Its
+session type is not sendable, so unlike the model's it stays on the main actor. It ignores the style
+guide and the per-language note because there is nowhere to put them, though both stay in the cache
+key. And its prewarm loads a language pair rather than warming a prompt prefix, declining to fetch a
+pack that is not installed so that prewarming never downloads anything unasked.
+
+A pack that is missing cannot be downloaded from plain code at all: the only initializer refuses a
+pair that is not installed, which is precisely the case where a download is wanted. A SwiftUI overlay
+is the documented way in, so the download lives in the Preferences language list rather than in the
+engine, and the framework reports per session whether the system will even accept the request.
+
+Availability here is not a property of the engine but of the pair, so it is reported per translation
+instead of up front. Every framework error is mapped to its own sentence naming the pair and the next
+step — download it, pick an explicit source, or switch engines — because a single "try again" line
+would hide which of those the user is actually facing.
 
 ### Settings and preferences
 
@@ -188,32 +237,44 @@ modifier, and lets Escape cancel.
 | `EasyWrite/MainMenu.swift` | The invisible main menu, which is what makes the editing key equivalents work at all |
 | `EasyWrite/TranslatorPanel.swift` | The popover itself: anchoring, focus, and transient dismissal |
 | `EasyWrite/TranslatorView.swift` | The popover's SwiftUI content: language row, swap, two panes, gear menu, footer actions |
-| `EasyWrite/TranslatorModel.swift` | Popover state: debounce, cancellation, cache lookup, phase, and what the swap button means |
+| `EasyWrite/TranslatorModel.swift` | Popover state: debounce, cancellation, cache lookup, phase, which engine runs, and what the swap button means |
 | `EasyWrite/Clipboard.swift` | The whole pasteboard surface: one read, one write, and the private-content policy |
+| `EasyWrite/TranslationEngine.swift` | The protocol both engines satisfy, and the two error types they have in common |
 | `EasyWrite/LLMTranslator.swift` | On-device model access: availability reporting, instruction construction, streaming, prewarming, timeout and retry |
+| `EasyWrite/AppleTranslator.swift` | Translation-framework access: one session per turn, prewarming a pair, timeout and explicit cancellation |
+| `EasyWrite/LanguagePacks.swift` | Language detection, pair availability, and the wording of every translation-framework failure |
+| `EasyWrite/LanguagePackList.swift` | The Preferences language list, its per-language status, and the one route to a pack download |
 | `EasyWrite/HotKey.swift` | Global hot-key registration and dispatch, via Carbon, so the shortcut fires from any app |
 | `EasyWrite/Store.swift` | Persisted user settings and change notification |
 | `EasyWrite/PreferencesController.swift` | Preferences window, its SwiftUI form, and the shortcut recorder |
 | `EasyWrite/KeyDisplay.swift` | Translation between key codes, modifier representations, and human-readable shortcut labels |
-| `EasyWriteCore/Languages.swift` | The supported-language table, the auto-detect sentinel, and lookup |
+| `EasyWriteCore/Engine.swift` | Which engines exist, the copy that explains each in Preferences, and the fallback for an unrecognised value |
+| `EasyWriteCore/Languages.swift` | The supported-language table, the auto-detect sentinel, the per-language note, and lookup |
 | `EasyWriteCore/TranslationCache.swift` | In-memory, capped, least-recently-used store of finished translations |
 
 Rules of thumb for locating a concern: anything about *what happens when* belongs to the app delegate
 or the popover model; anything about *the clipboard* belongs to `Clipboard`; anything about *what the
-model is told* belongs to `LLMTranslator`; anything *remembered between launches* belongs to `Store`;
-anything *pure* belongs in `EasyWriteCore` where it can be tested.
+model is told* belongs to `LLMTranslator`; anything about *whether a language pair can run* belongs to
+`LanguagePacks`; anything *remembered between launches* belongs to `Store`; anything *pure* belongs in
+`EasyWriteCore` where it can be tested.
 
 ## Platform requirements and dependencies
 
 There are no third-party dependencies. The app builds against system frameworks only: AppKit and
-SwiftUI for the interface, FoundationModels for the on-device model, ServiceManagement for the login
-item, and Carbon for global hot-keys.
+SwiftUI for the interface, FoundationModels for the on-device model, Translation for the second
+engine, NaturalLanguage for detecting the source language it needs, ServiceManagement for the login
+item, and Carbon for global hot-keys. Only Carbon needs a linker entry; the rest link from `import`
+alone.
 
 The minimum macOS version is declared in two places that must agree: the platform requirement in
-`Package.swift` and the minimum-system key in `Info.plist`. It is a recent major release, because
-FoundationModels requires it. Beyond the OS version, running the app meaningfully requires Apple
-Silicon with Apple Intelligence enabled and its model finished downloading; without that the app
-launches and the popover opens, but every translation is refused with an explanatory message.
+`Package.swift` and the minimum-system key in `Info.plist`. It is a recent major release *and* a point
+release above the one FoundationModels needs, because the translation framework's higher-quality
+strategy is gated later than the rest of the framework. Raising it further is a product decision, not
+a technical one, and it costs every user on the versions it skips.
+
+Beyond the OS version, running the app meaningfully requires Apple Silicon. The default engine also
+needs Apple Intelligence enabled with its model finished downloading; without that the popover still
+opens and explains why it will not translate, and switching engines is a working way out.
 
 The app requires **no permission at all** and ships no entitlements. It is not sandboxed.
 
@@ -256,15 +317,23 @@ Understanding these terms will make the code read correctly:
 - **Generation** — a counter identifying the current request, so a cancelled one cannot write state
   after a newer one has started.
 - **Warm session** — a model session prewarmed for one specific instruction string, spent on the next
-  translation and rebuilt afterwards.
-- **Style guide** — the user's free-text personal instructions and glossary, injected into every
-  translation so the output sounds like them.
+  translation and rebuilt afterwards. The other engine's equivalent is warmed for one language pair.
+- **Engine** — which translator produces the text: the Apple Intelligence model or the translation
+  framework. One global setting, applied to every translation, and part of the cache key.
+- **Language pack** — the data the translation framework needs for one language. Downloaded by macOS
+  on request, shared with every app on the machine, and irrelevant to the model engine.
+- **Style guide** — the user's free-text personal instructions, appended to every model instruction so
+  the output sounds like them. It is one global string, so it can express tone and preference but not
+  a per-language glossary, and the other engine ignores it entirely.
 - **Language note** — optional per-language guidance stored alongside a language entry and appended
-  to the model instruction, used where a language needs a standing hint such as a dialect choice.
+  to the model instruction only when that language is the target. This is the language-scoped lever
+  the style guide is not, and it is where a standing hint such as a dialect or register convention
+  belongs.
 - **Private clipboard content** — text whose source marked it with the nspasteboard concealed or
   transient type. Skipped by default.
-- **Availability / unavailable reason** — the model's readiness state and the specific reason it is
-  not usable, surfaced to the user as distinct messages.
+- **Availability / unavailable reason** — whether an engine can run at all and why not. The model
+  reports it up front; the translation framework cannot, because what is missing is a language pack
+  and that depends on the pair, so it is reported per translation instead.
 
 ## Constraints, gotchas, and design decisions
 
@@ -312,32 +381,56 @@ routine, harmless translations start failing.
 language model, so the instruction explicitly frames it as content, not as a request. Changes to
 the instruction text should preserve that framing, however much they shorten it.
 
-**Greedy decoding can loop on nonsense.** Deterministic sampling is what makes the cache trustworthy,
-but on input the model cannot make sense of, greedy decoding will repeat a phrase until the
-response-token cap stops it. That cap is the guard; do not remove it.
+**Greedy decoding can loop on nonsense.** On input the model cannot make sense of, greedy decoding
+will repeat a phrase until the response-token cap stops it. That cap is the guard; do not remove it,
+and do not reach for sampling to fix the looping — sampling was measured and is worse on every phrase
+that matters.
 
-**The model's word choice is not a prompt problem.** On longer sentences it sometimes picks an odd term
-or invents one. Measured on a supported Mac, the same sentence fails the same way under the v1
-110-word instruction, the current short one, greedy and temperature 0.1 alike, and whether or not the
-source language is named — so reaching for the instruction text is wasted effort. The user's style
-guide is the lever that works: pinning the term fixes it. Do not lengthen the instruction hoping to
-improve quality without measuring first.
+**The model's word choice is not a prompt problem.** On longer sentences it sometimes picks an odd
+term or invents one, and register drift and gender agreement go wrong the same way. Measured on a
+supported Mac, the same sentence fails the same way under a 110-word instruction and a 36-word one,
+under greedy and low-temperature sampling alike, and whether or not the source language is named — so
+reaching for the instruction text is wasted effort, and lengthening it without measuring first is
+worse than wasted. Three levers do exist, and they are not interchangeable:
+
+- **The style guide** pins a term for this user, and that does work. But it is a single global string
+  appended to every instruction, while the target language is chosen per translation out of thirteen,
+  so a term mapping written into it is wrong for the other twelve. It cannot carry a glossary.
+- **The language note** is the language-scoped mechanism, applied only when its language is the
+  target — as Arabic's dialect note already is. Standing per-language guidance belongs there.
+- **The other engine** does not invent terms at all, at the price of never using the user's.
+
+Both the note and the style guide are appended *after* the instruction's closing line, which is the
+one position measurement says must keep naming the target language. Arabic's instruction therefore
+ends with its dialect note rather than with "Output only the Arabic translation" — a known wrinkle
+rather than an oversight.
+
+**Two engines, one protocol, and no automatic fallback.** A failure reports its reason and stops,
+because the user chose the engine and silently answering with the other one would make the setting a
+lie. The protocol is what keeps the choice from becoming a conditional in five places: it is resolved
+once per run, by an exhaustive switch. A conditional on the engine anywhere else means the
+abstraction is in the wrong shape.
 
 **Hot-key registration failures are silent.** If the combination is already claimed by another
 application, registration fails and the shortcut simply does nothing; nothing warns the user. When the
 binding changes, all registrations are torn down and rebuilt from stored settings.
 
-**Adding a language is intentionally cheap.** Languages live in a single static table where each
-entry carries its code, display name, and an optional instruction note. Adding a row is the whole
-change; an unrecognised stored target code falls back to the first entry.
+**Adding a language is intentionally cheap, but only for one engine.** Languages live in a single
+static table where each entry carries its code, display name, and an optional instruction note.
+Adding a row is the whole change for the model, and an unrecognised stored target code falls back to
+the first entry. The translation framework covers its own set of languages, which is not this table,
+so a new row may be listed as unsupported there — that is reported, not hidden.
 
-**Almost everything is main-actor isolated.** The UI, the settings store, the translator, the popover
+**Almost everything is main-actor isolated.** The UI, the settings store, both engines, the popover
 model, and the clipboard namespace all run on the main actor. The exceptions are deliberate: the
 low-level hot-key callback, which hops to the main queue before invoking anything, and the streaming
-helper inside the translator, which is `nonisolated static` so it can consume the response stream off
-the main actor. Keep new code on the main actor unless there is a reason not to.
+helper inside the model translator, which is `nonisolated static` so it can consume the response
+stream off the main actor. That helper is safe only because the model's session type is
+`@unchecked Sendable`; the translation framework's session is not sendable at all, so the same pattern
+would be wrong there. Keep new code on the main actor unless there is a reason not to.
 
 **Automated coverage is narrow on purpose.** `EasyWriteCore` is unit tested, and one test enforces the
 single-pasteboard-write invariant by scanning the sources. Everything else — the popover, the hot-key,
-the model — is verified by hand on a supported Mac. See
+both engines — is verified by hand on a supported Mac. Neither engine is unit-testable: one needs
+Apple Intelligence, the other needs installed language packs. See
 [`conventions/testing/README.md`](conventions/testing/README.md).
