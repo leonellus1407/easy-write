@@ -18,6 +18,8 @@ final class TranslatorPanel: NSObject, NSPopoverDelegate {
         popover.animates = false
         popover.delegate = self
         popover.contentViewController = NSHostingController(rootView: content)
+        NotificationCenter.default.addObserver(self, selector: #selector(popoverLostFocus),
+                                               name: NSWindow.didResignKeyNotification, object: nil)
     }
 
     var isShown: Bool { popover.isShown }
@@ -46,6 +48,18 @@ final class TranslatorPanel: NSObject, NSPopoverDelegate {
     func close() { popover.performClose(nil) }
 
     func popoverDidClose(_ notification: Notification) { closedAt = Date() }
+
+    /// A transient popover closes when the user clicks outside it, but not when the app opens a
+    /// window of its own — Preferences would otherwise appear over a popover still holding the
+    /// screen. Losing the keyboard is the signal that covers both cases.
+    @objc private func popoverLostFocus(_ notification: Notification) {
+        guard popover.isShown,
+              notification.object as? NSWindow === popover.contentViewController?.view.window
+        else { return }
+        // Closing a window from inside its own notification is asking for trouble; the next turn
+        // of the run loop is soon enough that nothing is drawn in between.
+        DispatchQueue.main.async { [weak self] in self?.close() }
+    }
 
     /// Unlike anything else this app puts on screen, the popover deliberately takes focus: the
     /// user types in it, and nothing is pasted back, so stealing focus costs nothing.
