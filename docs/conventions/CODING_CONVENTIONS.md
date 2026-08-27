@@ -341,9 +341,11 @@ New UI goes in SwiftUI. Menu-bar chrome, dialogs, and anything positioned in scr
 Because the app is `LSUIElement` with `.accessory` activation policy, it has no Dock icon and is usually not the active app. That has consequences to respect:
 
 - Anything that needs keyboard focus must call `NSApp.activate(ignoringOtherApps: true)` first. The popover does, because the user types in it.
-- `statusItem.menu` must stay `nil`. Assigning a menu swallows the click that has to reach the button's action, and the popover would never open from the icon.
+- **An accessory app still needs `NSApp.mainMenu`.** It is never shown, but it is what makes ⌘C, ⌘V, ⌘X, ⌘Z and ⌘Q work. `MainMenu.install()` builds it, and every item targets the first responder. ⌘A is the trap when diagnosing this: `NSTextView` binds it natively and keeps working with no menu at all.
+- `statusItem.menu` stays `nil`, because assigning a menu swallows the click that has to reach the button's action. Showing a menu on right-click means assigning it for the length of one `performClick(nil)` and clearing it again.
 - A transient `NSPopover` is dismissed by AppKit on the same click that then reaches the status button, so a toggle has to refuse an open that arrives immediately after a close.
-- Anchor a popover with `show(relativeTo:of:preferredEdge:)` and let AppKit clamp it; position and clamp a plain window yourself against `NSScreen.visibleFrame`.
+- Anchor a popover with `show(relativeTo:of:preferredEdge:)`, then correct it: a status item is inset inside the menu bar, so AppKit's own placement overlaps the bar. Measure the content's screen rect and move the window, rather than offsetting the positioning rect — AppKit ignores a rect that falls entirely outside the positioning view and shows nothing.
+- Position and clamp a plain window yourself against `NSScreen.visibleFrame`.
 
 ---
 

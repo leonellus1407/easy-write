@@ -178,10 +178,33 @@ enabled.
 | 15 | Translate, press **Copy**, wait five seconds, then paste elsewhere | The translation pastes; nothing has overwritten it |
 | 16 | Translate **without** pressing Copy, then paste elsewhere | The text you originally copied pastes — the app wrote nothing |
 | 17 | Press Escape with the popover focused, and click outside it | Both close it |
-| 18 | Gear → Preferences, rebind the shortcut | The new combination opens the popover; the old one does not |
-| 19 | Preferences → add a style-guide line, then Retranslate | Output reflects the instruction |
-| 20 | Gear → Launch at login, twice | The checkmark tracks the state; no error dialog |
-| 21 | Quit and relaunch | Languages, shortcut and style guide survive; the cache does not — the first translation streams again |
+| 18 | Look at the menu bar with the popover open | The bar and every icon beside ours stay fully visible and undimmed — the popover starts below the bar |
+| 19 | Without clicking anything, type | The left pane already has the keyboard |
+| 20 | In the left pane press ⌘A, ⌘C, ⌘X, ⌘V, ⌘Z | All behave as in any text field. ⌘A is not proof on its own: `NSTextView` binds it natively and works even when the main menu is missing |
+| 21 | Watch the footer during a translation | A stopwatch counts up in hundredths, then holds the final time. A cached result says "Cached" instead |
+| 22 | Right-click the menu-bar icon | The settings menu opens — version, Preferences…, Launch at login, Quit — and the popover closes if it was open |
+| 23 | Gear → Preferences, rebind the shortcut | The new combination opens the popover; the old one does not |
+| 24 | Preferences → add a style-guide line, then Retranslate | Output reflects the instruction |
+| 25 | Gear → Launch at login, twice | The checkmark tracks the state; no error dialog |
+| 26 | Press ⌘Q with the popover focused | The app quits |
+| 27 | Quit and relaunch | Languages, shortcut and style guide survive; the cache does not — the first translation streams again |
+
+### Driving this from a script
+
+Most of the table can be automated on a Mac that has granted the terminal **Accessibility** and
+**Screen Recording**, which is how the rows above were checked: `osascript -e 'tell application
+"System Events" to key code 6 using {shift down, control down}'` for the hot-key, a short `CGEvent`
+helper for clicks, `screencapture -x -R x,y,w,h` to look at the result, and
+`CGWindowListCopyWindowInfo` filtered by owner to assert the popover's frame against
+`NSScreen.visibleFrame`.
+
+Two traps are worth knowing before trusting such a run:
+
+- **`keystroke "c" using command down` does not fire menu key equivalents.** Use the low-level form,
+  `key code 8 using {command down}`. A ⌘C test that silently does nothing looks exactly like the bug
+  it is meant to catch.
+- **Assert against a sentinel, not the previous value.** Copying text that the clipboard already held
+  proves nothing. Put a known string on the clipboard first and check it was replaced.
 
 If a step cannot be run — wrong hardware, Apple Intelligence unavailable, no password manager
 installed — say so explicitly rather than skipping it silently.
@@ -196,11 +219,25 @@ Stating these keeps anyone from assuming they are covered:
 - The hot-key: registration, rebinding, and the silent failure when another app owns the combination.
 - Streaming: that snapshots arrive progressively, and that the timeout and the single retry behave.
 - The clipboard read policy at runtime, including the nspasteboard markers.
+- The editing key equivalents, and therefore whether the main menu is installed at all.
 - Code signing, and Launch at Login (`SMAppService`) registration.
 - Translation quality for any language.
 - Behaviour when the model is mid-download or the Mac is unsupported.
 
 Each of these is verified by hand, or by a user reporting it.
+
+## 8. Translation quality is not a bug report about the prompt
+
+The on-device model is small. On longer sentences it sometimes chooses an odd word for a term, or
+invents one outright. Before changing the instruction text in response, measure — a throwaway script
+against `FoundationModels` costs a minute and settles it. The one time this was done, the same sentence
+failed identically under the v1 110-word instruction, the current short one, greedy sampling and
+temperature 0.1, and with the source language named or auto-detected. Only the user's style guide fixed
+it, by pinning the term.
+
+So: reproduce with a script, compare variants, and only then touch the instruction. A prompt change that
+fixes one sentence and breaks another is the normal outcome, and without measurements you will not know
+that is what happened.
 
 ---
 

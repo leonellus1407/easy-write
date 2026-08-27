@@ -13,7 +13,8 @@ permissions it needs and why, and how to report a security issue.
   press **Copy**.
 - **Easy Write reads the pasteboard and never writes it, except in the single code path behind the
   popover's Copy button.** That is one call site in the source, so you can check it by reading rather
-  than by taking our word for it.
+  than by taking our word for it. (Pressing ⌘C or ⌘X yourself inside a text pane copies too, the way
+  it does in any app — that is macOS doing what you asked, not the app deciding on its own.)
 - If the app that put something on your clipboard marked it as private or temporary — password
   managers do this — Easy Write leaves the panes empty and calls no model at all. You can turn that
   off in Preferences; it is on by default.

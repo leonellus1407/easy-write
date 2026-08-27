@@ -179,7 +179,8 @@ modifier, and lets Escape cancel.
 | File | Responsibility |
 |---|---|
 | `EasyWrite/main.swift` | Process entry point; installs the delegate and configures the app as a dock-less agent |
-| `EasyWrite/AppDelegate.swift` | Status item, the single hot-key, the popover toggle, the login item |
+| `EasyWrite/AppDelegate.swift` | Status item, the single hot-key, the popover toggle, the right-click settings menu, the login item |
+| `EasyWrite/MainMenu.swift` | The invisible main menu, which is what makes the editing key equivalents work at all |
 | `EasyWrite/TranslatorPanel.swift` | The popover itself: anchoring, focus, and transient dismissal |
 | `EasyWrite/TranslatorView.swift` | The popover's SwiftUI content: language row, swap, two panes, gear menu, footer actions |
 | `EasyWrite/TranslatorModel.swift` | Popover state: debounce, cancellation, cache lookup, phase, and what the swap button means |
@@ -269,15 +270,29 @@ instead of putting it back where the text came from. Do not reintroduce a synthe
 some later convenience work — it would bring back a permission the app no longer asks for.
 
 **A status item with a menu cannot have a button action.** Assigning `statusItem.menu` swallows the
-click, so the popover would never open from the icon. The gear menu inside the popover exists because
-of this.
+click, so the popover would never open from the icon. The item therefore keeps no menu; the right-click
+settings menu is assigned for the length of one programmatic click and cleared again.
 
 **A transient popover fights its own toggle.** AppKit dismisses it on the very click that then reaches
 the status button, so a naive toggle closes and immediately reopens it. The panel therefore refuses an
 open that arrives within a moment of a close.
 
+**The popover has to be pushed clear of the menu bar.** A status item is inset inside the bar, so
+anchoring to the button leaves the popover overlapping it and dimming the icons beside it. The panel
+measures where the content landed and drops the window by the overshoot, which is exact where guessing
+at the popover's chrome is not. Do not try to fix it by moving the positioning rect instead: AppKit
+ignores a rect that falls entirely outside the positioning view and shows nothing at all. The popover
+also does not animate, because an animation would animate to the frame AppKit chose rather than the
+corrected one.
+
 **The app is `LSUIElement`.** It has no Dock icon and is usually not frontmost, so the popover must
-activate the app before it can take keyboard focus.
+activate the app before it can take keyboard focus, and the text pane asks for focus on every open so
+the editing shortcuts have something to act on.
+
+**An accessory app still needs a main menu.** It shows none, but `NSApp.mainMenu` is what turns ⌘C,
+⌘V, ⌘X, ⌘Z and ⌘Q into working key equivalents. ⌘A is the trap when diagnosing this: `NSTextView`
+binds it natively, so Select All keeps working even when the menu is missing entirely and everything
+else is dead.
 
 **Model sessions are stateful.** Reusing one across turns grows its transcript, which slows later
 requests and leaves earlier text in context. Prewarming is per-instruction, so a session warmed for
@@ -295,6 +310,13 @@ the instruction text should preserve that framing, however much they shorten it.
 **Greedy decoding can loop on nonsense.** Deterministic sampling is what makes the cache trustworthy,
 but on input the model cannot make sense of, greedy decoding will repeat a phrase until the
 response-token cap stops it. That cap is the guard; do not remove it.
+
+**The model's word choice is not a prompt problem.** On longer sentences it sometimes picks an odd term
+or invents one. Measured on a supported Mac, the same sentence fails the same way under the v1
+110-word instruction, the current short one, greedy and temperature 0.1 alike, and whether or not the
+source language is named — so reaching for the instruction text is wasted effort. The user's style
+guide is the lever that works: pinning the term fixes it. Do not lengthen the instruction hoping to
+improve quality without measuring first.
 
 **Hot-key registration failures are silent.** If the combination is already claimed by another
 application, registration fails and the shortcut simply does nothing; nothing warns the user. When the

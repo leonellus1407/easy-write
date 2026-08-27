@@ -74,7 +74,7 @@ struct PreferencesView: View {
             }
 
             Section("Style & glossary") {
-                Text("Applied to every translation so it sounds like you — preferred terms, tone, who you are. E.g. “Use ‘Mail’ not ‘E-Mail’. Keep it concise. I’m a software engineer.”")
+                Text("Applied to every translation so it sounds like you — preferred terms, tone, who you are. E.g. “Use ‘Mail’ not ‘E-Mail’. Keep it concise. I’m a software engineer.” It is also the fix when the on-device model picks an odd word for a term: pin the term here and it will be used.")
                     .font(.caption)
                     .foregroundStyle(.secondary)
                 TextEditor(text: $store.styleGuide)
@@ -99,7 +99,7 @@ struct PreferencesView: View {
             }
         }
         .formStyle(.grouped)
-        .frame(width: 440, height: 470)
+        .frame(width: 440, height: 560)
         .onDisappear { recorder.stop() }
     }
 }

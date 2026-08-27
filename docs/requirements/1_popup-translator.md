@@ -23,6 +23,7 @@ Created:
 - `Sources/EasyWrite/TranslatorView.swift` — SwiftUI content: language row, swap button, two panes, footer actions
 - `Sources/EasyWrite/TranslatorModel.swift` — observable state for the popover: text, languages, phase, debounce, swap, retranslate
 - `Sources/EasyWrite/Clipboard.swift` — the app's whole pasteboard surface, one read and one write; owned by [`2_clipboard-read-only-invariant.md`](2_clipboard-read-only-invariant.md)
+- `Sources/EasyWrite/MainMenu.swift` — the invisible `NSApp.mainMenu`, without which ⌘C, ⌘V, ⌘X and ⌘Z do nothing in the text pane
 - `Sources/EasyWriteCore/TranslationCache.swift` — in-memory LRU of the last twenty results
 
 Moved:
@@ -210,26 +211,26 @@ for try await snapshot in session.streamResponse(to: prompt, options: options) {
 
 ## Acceptance Criteria
 
-Boxes are ticked only where the behaviour was actually observed or is enforced by a
-test. The ones left open are the interactive rows: see "What was actually run".
+Boxes are ticked only where the behaviour was actually observed on a supported Mac or is enforced by a
+test. See "What was actually run".
 
 ### Functional Requirements
 
-- [x] Pressing `⇧⌃Z` opens the popover at the status icon; pressing it again closes it — the toggle path was run; the *key combination itself* reaching the app was not
-- [ ] Clicking the status icon does exactly what the hot-key does — same code path, not clicked by hand
+- [x] Pressing `⇧⌃Z` opens the popover at the status icon; pressing it again closes it
+- [x] Clicking the status icon does exactly what the hot-key does
 - [x] Opening the popover fills the left pane from the clipboard and starts translating without further input
-- [x] The right pane fills progressively while the model generates — nine cumulative snapshots for a 330-character paragraph
+- [x] The right pane fills progressively while the model generates — caught mid-stream on screen, and nine cumulative snapshots for a 330-character paragraph
 - [x] Source and target are dropdowns; source offers `Auto-detect` and defaults to it
-- [ ] The swap button exchanges the two languages, keeps the input text, and retranslates
-- [ ] Editing the left pane retranslates after a short pause, cancelling the previous run
-- [x] Re-requesting a translation already in the cache fills the right pane with no model call — cache behaviour is unit tested
-- [ ] Every result, cached or fresh, has a retranslate button that forces a new run
+- [x] The swap button exchanges the two languages, keeps the input text, and retranslates
+- [x] Editing the left pane retranslates after a short pause, cancelling the previous run
+- [x] Re-requesting a translation already in the cache fills the right pane with no model call — observed, and the cache is unit tested
+- [x] Every result, cached or fresh, has a retranslate button that forces a new run
 - [ ] The shortcut is rebindable in Preferences and persists across relaunch
 
 ### Edge Cases & Error Handling
 
 - [x] Empty or whitespace-only clipboard → popover opens with empty panes, no model call, no beep loop
-- [x] Clipboard holds no text representation (image, file) → left pane stays empty, no crash — observed with a concealed marker, which takes the identical branch
+- [x] Clipboard holds no text representation (image, file) → left pane stays empty, no crash — observed with a real image on the clipboard
 - [ ] Model unavailable → the specific explanatory message from `LLMTranslator.Unavailable`, shown in the popover rather than a modal — Apple Intelligence was available on the test machine, so this path did not run
 - [ ] Model times out → the popover shows a failed state and stays responsive; the timeout is never retried
 - [x] Source and target set to the same language → still translates, no special case
@@ -240,10 +241,10 @@ test. The ones left open are the interactive rows: see "What was actually run".
 ### User Experience
 
 - [x] All strings are English, sentence case, typographic punctuation, no emoji
-- [ ] The popover is anchored to the status icon and clamped on screen by AppKit
-- [ ] The popover takes focus, so Escape closes it and the text panes are usable from the keyboard
-- [ ] Clicking outside dismisses it (`behavior = .transient`)
-- [ ] Progress is visible in the popover; the status icon still swaps while a translation runs
+- [x] The popover is anchored to the status icon, clamped on screen, and clear of the menu bar and the icons beside ours
+- [x] The popover takes focus, the text pane takes it in turn, Escape closes it, and the standard editing shortcuts work in it
+- [x] Clicking outside dismisses it (`behavior = .transient`)
+- [x] Progress is visible in the popover — a spinner and a stopwatch — and the status icon still swaps while a translation runs
 
 ### Privacy Impact
 
@@ -289,26 +290,35 @@ On macOS 26.5.2, Apple Silicon, Apple Intelligence available. `swift build` and
 `swift build -c release` are warning-free; `./test.sh` passes nine tests; the guard
 test was shown to fail by temporarily adding a second pasteboard write.
 
-The app was launched from the built bundle and translated a real clipboard
-end-to-end, driven from a temporary hook in `applicationDidFinishLaunching` that
-opened the popover, waited for the stream, pressed Copy and quit. That hook was
-removed before committing. Observed: an English sentence became a correct Russian
-translation using the stored target language, and the copy button put it on the
-clipboard.
+The popover was driven with real input events — `key code` through System Events for
+keys, `CGEvent` for clicks — and checked with screenshots and with
+`CGWindowListCopyWindowInfo` for geometry. Observed: the hot-key opens and closes it;
+clicking the icon does the same; Escape and a click outside both dismiss it; the
+translation streams in visibly and the stopwatch ticks up alongside it (1.39 s → 2.44 s
+mid-stream, holding at 3.36 s when it finished); ⌘A, ⌘C and ⌘V work in the left pane,
+and a paste retranslated on its own; reopening on an unchanged clipboard showed the
+result instantly, labelled "Cached"; Retranslate cleared it and streamed a fresh run;
+swap exchanged Russian and English, kept the text, and retranslated once; right-clicking
+the icon opened the settings menu; ⌘Q quit. An image on the clipboard left both panes
+empty with no crash. With the popover open, the menu bar and every neighbouring icon
+stayed fully visible.
 
-Streaming and prewarming were measured separately against the FoundationModels API
-with the same options and instruction this app uses: a 330-character paragraph
-arrived in nine cumulative snapshots and finished in 2.5 s, and prewarming a session
-moved the first snapshot from 2.36 s to 0.25 s.
+Prewarming was measured separately against the FoundationModels API with the same
+options and instruction this app uses: it moves the first snapshot from 2.36 s to
+0.25 s.
 
-**What could not be run here.** macOS denies this environment synthetic keystrokes
-and screen capture, so nothing that needs a real key press, a click, or a look at
-the screen was exercised: the hot-key combination itself, clicking the status icon,
-the swap button, the debounce on typing, Escape and click-outside dismissal, the
-gear menu, rebinding the shortcut, and whether the popover is positioned and
-rendered correctly. The smoke test in
-[`testing/README.md`](../conventions/testing/README.md) is the list to work through
-on a Mac with those grants.
+**What was not run.** The shortcut recorder in Preferences, the hot-key already being
+claimed by another app, the model being unavailable or timing out — Apple Intelligence
+was available throughout, so those paths never executed. Those rows of the smoke test in
+[`testing/README.md`](../conventions/testing/README.md) are still outstanding.
+
+**Translation quality is a separate matter, and it is the model's.** Asked to translate
+"…move the pricing details into an appendix?" into Russian, the on-device model returns
+an invented word for *appendix*. Measured on this Mac, that is identical under the v1.1.1
+110-word instruction, under the short one, under greedy sampling and temperature 0.1, and
+whether the source language is named or auto-detected — so it is not a regression from
+this work and not reachable through the instruction text. Pinning the term in the style
+guide fixes it, which is what that setting is for.
 
 ### Code Examples from Existing Features
 

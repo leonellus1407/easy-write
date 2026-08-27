@@ -70,9 +70,26 @@ words already on screen. A stalled request can never wedge the app.
 
 ## 2. The popover, and the clipboard rule
 
-Pressing `⇧⌃Z` or clicking the menu-bar icon opens an `NSPopover` anchored to the status button, so
-AppKit positions it and clamps it to the screen. Unlike the rest of the app it deliberately takes
-focus, because you type in it.
+Pressing `⇧⌃Z` or clicking the menu-bar icon opens an `NSPopover` anchored to the status button.
+Unlike the rest of the app it deliberately takes focus, because you type in it — and the text pane
+takes it in turn, so you can start editing straight away.
+
+Two AppKit details are load-bearing here, and both are easy to get wrong:
+
+- **The popover has to be pushed clear of the menu bar.** A status item is inset inside the bar, so
+  anchoring to the button leaves the popover overlapping it and dimming the icons either side of
+  yours. Measuring where the content landed and dropping the window by the overshoot is exact;
+  guessing at the popover's own chrome is not. Stretching the *positioning rect* instead does not
+  work — AppKit ignores a rect that falls entirely outside the view and shows nothing at all.
+- **An accessory app needs a main menu to get ⌘C.** It shows no menu bar, but `NSApp.mainMenu` is
+  still what turns ⌘C, ⌘V, ⌘X and ⌘Z into working key equivalents; without it the text pane cannot
+  be edited from the keyboard. ⌘A is the misleading exception — `NSTextView` binds that one itself,
+  so it works even when nothing else does.
+
+Right-clicking the icon opens the same settings menu as the gear button. That is done by handing the
+menu to the status item and clicking it programmatically, then clearing it again — a status item with
+a menu assigned swallows the click that has to reach the button's action, so it cannot simply keep
+one.
 
 The clipboard is **read and never written**, with one exception: the **Copy** button. That is a single
 call site in `TranslatorModel.copyOutput()`, and a unit test scans `Sources/` to make sure a second
@@ -126,7 +143,8 @@ Copy. The translation cache lives in memory and dies with the process. See
 | File | Responsibility |
 |------|----------------|
 | `EasyWrite/main.swift` | Dock-less menu-bar agent entry point |
-| `EasyWrite/AppDelegate.swift` | Status item, the one hot-key, popover toggle, login item |
+| `EasyWrite/AppDelegate.swift` | Status item, the one hot-key, popover toggle, right-click settings menu, login item |
+| `EasyWrite/MainMenu.swift` | The invisible main menu that makes the editing key equivalents work |
 | `EasyWrite/TranslatorPanel.swift` | The `NSPopover` anchored to the status button |
 | `EasyWrite/TranslatorView.swift` | Language row, swap, the two panes, retranslate and copy |
 | `EasyWrite/TranslatorModel.swift` | Popover state: debounce, cancellation, the clipboard read and the one write |

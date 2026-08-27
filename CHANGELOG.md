@@ -26,6 +26,13 @@ its own popover, which means it no longer needs any permission at all.
   that put something on your clipboard for a moment. Easy Write now leaves the panes empty rather than
   translating it, and never remembers it. There is a checkbox in Preferences if you would rather it
   always read.
+- **A stopwatch for each translation.** The footer counts up in hundredths of a second while the model
+  works and then holds the time it took, so you can see what a translation actually costs. A result
+  that came from memory says so instead.
+- **The text pane is ready to type in.** It takes the keyboard as soon as the popover opens, and the
+  standard editing shortcuts — ⌘A, ⌘C, ⌘X, ⌘V, ⌘Z — now work in it. ⌘Q quits.
+- **Right-click the menu-bar icon** for the settings menu, the same one the gear button opens. Left-click
+  still opens the translator.
 
 ### Changed
 - **No permission is required any more, and none is requested.** Version 1 needed Accessibility so it
@@ -50,6 +57,10 @@ its own popover, which means it no longer needs any permission at all.
   is what makes the instant repeats trustworthy. On input the model cannot make sense of — a random
   string rather than a sentence — that determinism shows up as a repeated phrase, cut off after a
   sensible length rather than running away.
+- The on-device model is small, and on longer sentences it sometimes picks an odd word for a term or
+  even invents one. This has not changed in this release — the same sentences went wrong the same way
+  in 1.1.1. The **style guide** in Preferences is the fix: pin the term (`appendix = …`) and it is
+  used from then on. Anything important is still worth reading before you send it.
 - Your existing target language, style guide and login-item setting carry over. A shortcut you rebound
   in version 1 does not, since the actions it was bound to no longer exist; the new one starts at
   `⇧⌃Z` and is rebindable as before.

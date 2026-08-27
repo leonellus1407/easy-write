@@ -13,6 +13,9 @@ final class TranslatorPanel: NSObject, NSPopoverDelegate {
     init(content: TranslatorView) {
         super.init()
         popover.behavior = .transient
+        // The popover is repositioned the moment it appears, and an animation would animate to the
+        // frame AppKit chose rather than the corrected one.
+        popover.animates = false
         popover.delegate = self
         popover.contentViewController = NSHostingController(rootView: content)
     }
@@ -26,6 +29,20 @@ final class TranslatorPanel: NSObject, NSPopoverDelegate {
         show(relativeTo: button)
     }
 
+    /// AppKit anchors the popover to the status item, which is inset inside the menu bar, so the
+    /// popover ends up overlapping the bar and dimming the icons either side of ours. Measuring
+    /// where the content actually landed and dropping the window by the overshoot is exact;
+    /// guessing at the popover's own chrome, or at which way the button's y axis runs, is not.
+    private func clearMenuBar() {
+        guard let view = popover.contentViewController?.view,
+              let window = view.window,
+              let screen = window.screen ?? NSScreen.main else { return }
+        let contentTop = window.convertToScreen(view.convert(view.bounds, to: nil)).maxY
+        let overshoot = contentTop - screen.visibleFrame.maxY
+        guard overshoot > 0 else { return }
+        window.setFrameOrigin(NSPoint(x: window.frame.minX, y: window.frame.minY - overshoot))
+    }
+
     func close() { popover.performClose(nil) }
 
     func popoverDidClose(_ notification: Notification) { closedAt = Date() }
@@ -35,6 +52,7 @@ final class TranslatorPanel: NSObject, NSPopoverDelegate {
     private func show(relativeTo button: NSStatusBarButton) {
         NSApp.activate(ignoringOtherApps: true)
         popover.show(relativeTo: button.bounds, of: button, preferredEdge: .minY)
+        clearMenuBar()
         popover.contentViewController?.view.window?.makeKey()
     }
 }
