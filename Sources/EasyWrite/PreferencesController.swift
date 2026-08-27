@@ -1,4 +1,5 @@
 import AppKit
+import EasyWriteCore
 import SwiftUI
 
 /// Captures the next key combo for a given action (shortcut recorder).
@@ -61,26 +62,49 @@ struct PreferencesView: View {
     @ObservedObject var recorder: Recorder
 
     private let actions: [(key: String, title: String)] = [
-        ("formal", "Formal"), ("informal", "Informal"),
-        ("plain", "Plain"), ("english", "Read → English"),
+        ("translate", "Open the translator"),
     ]
 
     var body: some View {
         Form {
-            Section("Behaviour") {
-                Picker("Target language", selection: $store.targetCode) {
-                    ForEach(Languages.all) { Text($0.name).tag($0.code) }
+            Section("Translation engine") {
+                Picker("Engine", selection: $store.engine) {
+                    ForEach(Engine.allCases) { engine in
+                        VStack(alignment: .leading, spacing: 2) {
+                            Text(engine.title)
+                            Text(engine.caption)
+                                .font(.caption)
+                                .foregroundStyle(.secondary)
+                                .fixedSize(horizontal: false, vertical: true)
+                        }
+                        .tag(engine.rawValue)
+                    }
                 }
-                Toggle("Preview before replacing", isOn: $store.previewBeforeReplace)
+                .pickerStyle(.radioGroup)
+                .labelsHidden()
+
+                if Engine.named(store.engine) == .translate {
+                    LanguagePackList(targetCode: store.targetCode)
+                }
+            }
+
+            Section("Clipboard") {
+                Toggle("Ignore private clipboard content", isOn: $store.ignoresPrivateClipboard)
+                Text("Password managers and some apps mark what they copy as private or temporary. Leave this on and Easy Write opens with empty panes instead of reading it.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
             }
 
             Section("Style & glossary") {
-                Text("Applied to every translation so it sounds like you — preferred terms, tone, who you are. E.g. “Use ‘Mail’ not ‘E-Mail’. Keep it concise. I’m a software engineer.”")
+                Text("Applied to every translation so it sounds like you — preferred terms, tone, who you are. E.g. “Use ‘Mail’ not ‘E-Mail’. Keep it concise. I’m a software engineer.” It is also the fix when the on-device model picks an odd word for a term: pin the term here and it will be used.")
                     .font(.caption)
                     .foregroundStyle(.secondary)
                 TextEditor(text: $store.styleGuide)
                     .font(.body)
                     .frame(minHeight: 110)
+                Text("Apple Intelligence only. Apple Translate takes no instructions, so it ignores this — the text is kept either way, for when you switch back.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
             }
 
             Section("Shortcuts") {

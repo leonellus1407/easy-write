@@ -1,19 +1,20 @@
 # Easy Write — Testing Guide
 
-## Current state: there is no test suite
+## Current state: a small suite, no CI
 
-This is the honest starting point, and every plan, PR, and doc must be written
-against it:
+This is the honest starting point, and every plan, PR, and doc must be written against it:
 
-- `Package.swift` declares exactly one target — `.executableTarget(name: "EasyWrite")`.
-- There is no `Tests/` directory and no `.testTarget`.
-- `swift test` therefore runs nothing.
-- There is no CI: `.github/` contains only issue templates, no workflows.
+- `Package.swift` declares three targets: the `EasyWriteCore` library, the `EasyWrite` executable, and
+  the `EasyWriteCoreTests` test target.
+- Nine tests exist, all covering `EasyWriteCore` or the source tree itself. They run in
+  milliseconds, need no permissions, and never call the model.
+- Everything with a UI, a hot-key, or a model call has **no automated coverage at all**.
+- There is no CI: `.github/` contains only issue templates, no workflows. Nobody runs these tests
+  except the person who typed the command.
 - There is no SwiftLint or swift-format configuration.
 
-Do not write "tests pass" in a PR. Do not add a coverage claim. If a change
-needs proof, either add the test target (section 3) or record a manual
-reproduction (section 6).
+So "the tests pass" is a much smaller claim than it sounds. Say what actually ran, and record a manual
+reproduction (section 6) for anything the suite does not reach.
 
 ---
 
@@ -23,111 +24,110 @@ reproduction (section 6).
 |---|---|---|
 | Compile | `swift build` | type errors, isolation mistakes, warnings |
 | Release compile | `swift build -c release` | optimiser-only failures; what `./build.sh` runs |
+| Unit tests | `./test.sh` | language lookup, cache behaviour, the single-pasteboard-write invariant |
 | Bundle | `./build.sh` | plist/icon/codesign problems |
 | Manual smoke test | see section 6 | everything else |
 
-`swift build` must finish **warning-free**. With no linter and no tests, the
-compiler is the only automated signal this repo has.
+`swift build` must finish **warning-free**. With no linter and no CI, the compiler is still the
+strongest automated signal this repo has.
+
+### Why `./test.sh` and not `swift test`
+
+Both work; use whichever runs. With full Xcode installed, `swift test` is enough. With only the
+Command Line Tools, swift-testing ships as a framework that SwiftPM leaves off the search path and
+`swift test` fails with `no such module 'Testing'`. `./test.sh` adds the framework and its rpaths, then
+hands off to `swift test`, passing any extra arguments straight through:
+
+```bash
+./test.sh                                        # all
+./test.sh --filter TranslationCacheTests         # one suite
+./test.sh --list-tests                           # enumerate
+```
 
 ---
 
 ## 2. Why the automatable surface is small
 
-Most of the app is not unit-testable, for reasons that are properties of the
-app rather than gaps to be fixed:
+Most of the app is not unit-testable, for reasons that are properties of the app rather than gaps to
+be fixed:
 
-- **It is `@MainActor` AppKit.** `AppDelegate`, `ReaderPanel`, and
-  `PreferencesController` build menus, panels, and windows. Exercising them
-  needs a running `NSApplication`, not a test process.
-- **It drives other applications.** `Replacer` posts synthetic ⌘C/⌘V through
-  `CGEvent` and reads the system pasteboard. That requires an Accessibility
-  grant, a focused target app, and real timing.
-- **The engine is hardware-bound and non-deterministic.** `LLMTranslator` calls
-  Apple's on-device model, which needs Apple Silicon with Apple Intelligence
-  enabled and returns different wording run to run.
-- **Hot-keys are global OS state.** `HotKeyCenter` registers with Carbon
-  system-wide; two test processes would fight over the same combination.
+- **It is `@MainActor` AppKit.** `AppDelegate`, `TranslatorPanel`, and `PreferencesController` build a
+  status item, a popover, and a window. Exercising them needs a running `NSApplication`, not a test
+  process.
+- **The engine is hardware-bound and non-deterministic.** `LLMTranslator` calls Apple's on-device
+  model, which needs Apple Silicon with Apple Intelligence enabled. Greedy sampling makes it
+  repeatable for the same input, but it is still a several-second call to a model that a future OS
+  update will reword.
+- **Hot-keys are global OS state.** `HotKeyCenter` registers with Carbon system-wide; two test
+  processes would fight over the same combination.
+- **The clipboard is shared, mutable, machine-wide state.** A test must not write to
+  `NSPasteboard.general`, so the read policy in `Clipboard` cannot be exercised directly.
 
-What *is* worth testing is the pure logic wrapped around all of that.
+What *is* worth testing is the pure logic wrapped around all of that, plus — see section 4 — the
+invariants that can be checked by reading the source rather than by running it.
 
 ---
 
-## 3. Adding a test target
+## 3. The package layout that makes testing possible
 
-Adding tests is a change to the package layout. Agree on it first — do not do it
-as a side effect of another task.
-
-### Preferred: extract a library target
-
-Move the pure logic into a plain library, let both the executable and the tests
-depend on it. This avoids linking a target that owns `main`, and it makes the
-testable surface explicit.
+`EasyWriteCore` is a plain library target holding the pure value logic, deliberately free of AppKit and
+FoundationModels. Both the executable and the tests depend on it, which avoids linking a target that
+owns `main` and makes the testable surface explicit:
 
 ```swift
 targets: [
-    .target(
-        name: "EasyWriteCore",
-        path: "Sources/EasyWriteCore"
-    ),
-    .executableTarget(
-        name: "EasyWrite",
-        dependencies: ["EasyWriteCore"],
-        path: "Sources/EasyWrite",
-        swiftSettings: [.swiftLanguageMode(.v5)],
-        linkerSettings: [.linkedFramework("Carbon")]
-    ),
-    .testTarget(
-        name: "EasyWriteCoreTests",
-        dependencies: ["EasyWriteCore"],
-        path: "Tests/EasyWriteCoreTests"
-    )
+    .target(name: "EasyWriteCore", path: "Sources/EasyWriteCore", ...),
+    .executableTarget(name: "EasyWrite", dependencies: ["EasyWriteCore"], ...),
+    .testTarget(name: "EasyWriteCoreTests", dependencies: ["EasyWriteCore"], ...)
 ]
 ```
 
-### Quicker: depend on the executable directly
+New pure logic goes in `EasyWriteCore` so it can be tested. Anything that imports AppKit or
+FoundationModels stays in `EasyWrite`. Moving an existing type across that line is a change to the
+package layout — agree on it first, rather than doing it as a side effect of another task.
 
-SwiftPM allows a test target to depend on an executable target. It works, but it
-links the whole app — including its AppKit and FoundationModels imports — into
-the test bundle, so it is the more fragile option.
-
-```swift
-.testTarget(
-    name: "EasyWriteTests",
-    dependencies: ["EasyWrite"],
-    path: "Tests/EasyWriteTests"
-)
-```
-
-Either way, remember the platform floor: tests build and run only on macOS 26+
-with Apple Silicon.
+Remember the platform floor: tests build and run only on macOS 26+ with Apple Silicon.
 
 ---
 
-## 4. What to test first
+## 4. What is covered, and what to cover next
 
-In priority order, with the change each one needs:
+Covered today:
+
+| Unit | What the test protects |
+|---|---|
+| `Languages.named(_:)` | Falls back to the first language for a code this build no longer ships, and every language resolves to its own entry |
+| `Languages.auto` / `sources` | The auto-detect sentinel can be a source and can never become a target |
+| `TranslationCache` | A repeat hits; the style guide, both language codes and the text are all part of the key; overflow evicts the least recently used entry; a read refreshes recency; remove forces a fresh run |
+| Pasteboard writes | Exactly one function under `Sources/` calls a pasteboard-writing API, and it is `Clipboard.write` |
+
+That last one is not a unit test in the usual sense: it scans the source tree for the closed list of
+`NSPasteboard` writing calls (`clearContents`, `writeObjects`, `setString`, `setData`,
+`setPropertyList`, `declareTypes`, `prepareForNewContents`) and asserts they all sit in one function.
+It exists because the promise in [`SECURITY.md`](../../../SECURITY.md) is a count of call sites, and a
+count is worth enforcing rather than remembering. When it fails it names the offending function.
+
+Worth adding next, in priority order:
 
 | Unit | Why it is worth a test | Change required |
 |---|---|---|
-| `KeyDisplay.string(keyCode:modifiers:)` | Pure mapping, easy to break when adding keys; wrong labels are user-visible | none — already `internal` and non-isolated |
-| `KeyDisplay.carbonModifiers(from:)` | Bit-mask conversion between two APIs; silent if wrong | none |
-| `Languages.named(_:)` | Falls back to the first language for an unknown code — a real upgrade path when a code is removed | none |
-| `LLMTranslator.clean(_:)` | Strips surrounding quotes the model sometimes adds; edge cases (one quote, empty, quoted-inside) are exactly where it breaks | make it non-`private` |
-| `Store` shortcut merge/decode | The upgrade path: a release that adds an action must not lose it for existing users | inject `UserDefaults` instead of reading `.standard` in `init` |
+| `KeyDisplay.string(keyCode:modifiers:)` | Pure mapping, easy to break when adding keys; wrong labels are user-visible | move to `EasyWriteCore` (it only needs `NSEvent.ModifierFlags` for one function) |
+| `KeyDisplay.carbonModifiers(from:)` | Bit-mask conversion between two APIs; silent if wrong | same |
+| `LLMTranslator.clean(_:)` | Strips surrounding quotes the model sometimes adds; edge cases (one quote, empty, quoted-inside) are exactly where it breaks | extract it into `EasyWriteCore` |
+| `Store` shortcut merge/decode | The upgrade path: a release that renames an action must not lose the user's binding | inject `UserDefaults` instead of reading `.standard` in `init` |
 
-Everything above is deterministic, needs no permissions, and runs in
-milliseconds. That is the bar for "worth automating" in this repo.
+Everything above is deterministic, needs no permissions, and runs in milliseconds. That is the bar for
+"worth automating" in this repo.
 
 ---
 
 ## 5. Conventions for new tests
 
-- **Use Swift Testing** (`import Testing`, `@Test`, `#expect`) for new tests.
-  It ships with the Swift 6 toolchain the package already requires. XCTest is
-  acceptable if you need something Swift Testing lacks; do not mix styles inside
-  one file.
-- **Given/when/then as the display name**, mirroring how behaviour is described
-  everywhere else in this repo:
+- **Use Swift Testing** (`import Testing`, `@Test`, `#expect`). It ships with the Swift 6 toolchain the
+  package already requires. XCTest is acceptable if you need something Swift Testing lacks; do not mix
+  styles inside one file.
+- **Given/when/then as the display name**, mirroring how behaviour is described everywhere else in
+  this repo:
 
 ```swift
 @Test("given an unknown language code, when looked up, then it falls back to German")
@@ -136,33 +136,24 @@ func unknownLanguageCodeFallsBack() {
 }
 ```
 
-- **One behaviour per test.** No shared mutable state between tests; Swift
-  Testing runs them in parallel by default.
-- **Never call the model.** No test may depend on Apple Intelligence being
-  enabled, on network access, or on wall-clock timing.
-- **Never touch `UserDefaults.standard`.** Inject a
-  `UserDefaults(suiteName:)` and call `removePersistentDomain(forName:)`
-  afterwards, so a test run cannot corrupt the developer's real settings.
-- **No Accessibility, no pasteboard.** A unit test must not post `CGEvent`s or
-  write to `NSPasteboard.general`.
+- **One behaviour per test.** No shared mutable state between tests; Swift Testing runs them in
+  parallel by default.
+- **Never call the model.** No test may depend on Apple Intelligence being enabled, on network access,
+  or on wall-clock timing.
+- **Never touch `UserDefaults.standard`.** Inject a `UserDefaults(suiteName:)` and call
+  `removePersistentDomain(forName:)` afterwards, so a test run cannot corrupt the developer's real
+  settings.
+- **Never touch `NSPasteboard.general`.** A test must not read or write the developer's clipboard.
 - **English** in names, comments, and failure messages.
-- **Test the contract, not the implementation.** Assert on the returned string,
-  not on how it was assembled.
-
-Run them with:
-
-```bash
-swift test                                    # all
-swift test --filter EasyWriteCoreTests        # one target
-swift test --list-tests                       # enumerate
-```
+- **Test the contract, not the implementation.** Assert on the returned string, not on how it was
+  assembled.
 
 ---
 
 ## 6. Manual smoke test
 
-This is the real acceptance gate today. Run it on macOS 26+ / Apple Silicon with
-Apple Intelligence enabled, after `./setup-signing.sh` has been run once.
+This is still the real acceptance gate. Run it on macOS 26+ / Apple Silicon with Apple Intelligence
+enabled.
 
 ```bash
 ./build.sh && open EasyWrite.app
@@ -170,56 +161,53 @@ Apple Intelligence enabled, after `./setup-signing.sh` has been run once.
 
 | # | Step | Expected |
 |---|---|---|
-| 1 | Launch | Speech-bubble icon appears in the menu bar; **no** Dock icon |
-| 2 | Open the menu | Header shows the version from `Info.plist`; all four actions list their current shortcuts |
-| 3 | First launch only | Accessibility prompt appears; grant it in System Settings → Privacy & Security → Accessibility |
-| 4 | Select "Can you send me the report tomorrow?" in TextEdit, press `⌥⌘T` | Selection is replaced in place with a formal translation in the target language; icon flashes a checkmark |
-| 5 | Repeat with `⌥⌘I` | Informal forms (German *du*, French *tu*, …) instead of formal |
-| 6 | Repeat with `⌥⌘P` | Translation that keeps the source's tone |
-| 7 | Select foreign text on a web page in Safari, press `⌥⌘E` | Floating popup appears near the cursor with the English text; Safari keeps focus; Copy and Done work; it disappears on its own after ~30 s |
-| 8 | Copy a distinctive string, then translate with `⌥⌘T` so the selection is replaced | Within about a second of the paste, the original clipboard content is back. Scoped to the replacing paths — see the note below |
-| 9 | Press a shortcut with nothing selected | Single beep, no dialog, no crash |
-| 10 | Preferences → change target language | Menu labels and pronoun hints update immediately |
-| 11 | Preferences → rebind a shortcut, press Esc | Recording cancels, the old shortcut still works |
-| 12 | Preferences → rebind a shortcut for real | The new combination works; the old one no longer does |
-| 13 | Preferences → add a style-guide line, translate again | Output reflects the instruction |
-| 14 | Enable "Preview before replacing", translate | Dialog with Replace / Copy / Cancel; Replace pastes into the original app |
-| 15 | Toggle Launch at Login twice | Checkmark tracks the state; no error dialog |
-| 16 | Quit and relaunch | Settings survive |
+| 1 | Launch | Speech-bubble icon appears in the menu bar; **no** Dock icon; **no permission prompt of any kind** |
+| 2 | Copy "Can you send me the report tomorrow?", press `⇧⌃Z` | Popover opens at the icon; left pane holds the sentence; the right pane starts filling within about a second |
+| 3 | Press `⇧⌃Z` again | Popover closes |
+| 4 | Click the status icon | Same as step 2; clicking it again closes it |
+| 5 | Change the target language | Retranslates into the new language |
+| 6 | Pick an explicit source language, press swap | The two languages exchange, the input text is unchanged, and it retranslates once |
+| 7 | Set the source back to Auto-detect | The swap button is disabled |
+| 8 | Close the popover and reopen it with the same clipboard | The result appears instantly, with no generation delay |
+| 9 | Press **Retranslate** on that cached result | A fresh run visibly streams again |
+| 10 | Edit the left pane | Retranslates once after a short pause, not once per keystroke |
+| 11 | Edit the left pane, close the popover, reopen it | The edit is still there — the clipboard has not changed, so it is not re-read |
+| 12 | Copy something new, reopen | The new clipboard text replaces the pane |
+| 13 | Copy an image, press `⇧⌃Z` | Empty panes, no crash |
+| 14 | Copy a password from a password manager, press `⇧⌃Z` | Empty panes and no model call. Uncheck "Ignore private clipboard content" in Preferences and it reads normally |
+| 15 | Translate, press **Copy**, wait five seconds, then paste elsewhere | The translation pastes; nothing has overwritten it |
+| 16 | Translate **without** pressing Copy, then paste elsewhere | The text you originally copied pastes — the app wrote nothing |
+| 17 | Press Escape with the popover focused, and click outside it | Both close it |
+| 18 | Look at the menu bar with the popover open | The bar and every icon beside ours stay fully visible and undimmed — the popover starts below the bar |
+| 19 | Without clicking anything, type | The left pane already has the keyboard |
+| 20 | In the left pane press ⌘A, ⌘C, ⌘X, ⌘V, ⌘Z | All behave as in any text field. ⌘A is not proof on its own: `NSTextView` binds it natively and works even when the main menu is missing |
+| 21 | Watch the footer during a translation | A stopwatch counts up in hundredths, then holds the final time. A cached result says "Cached" instead |
+| 22 | Right-click the menu-bar icon | The settings menu opens — version, Preferences…, Launch at login, Quit — and the popover closes if it was open |
+| 23 | Gear → Preferences, rebind the shortcut | The new combination opens the popover; the old one does not |
+| 24 | Preferences → add a style-guide line, then Retranslate | Output reflects the instruction |
+| 25 | Gear → Launch at login, twice | The checkmark tracks the state; no error dialog |
+| 26 | Press ⌘Q with the popover focused | The app quits |
+| 27 | Quit and relaunch | Languages, shortcut and style guide survive; the cache does not — the first translation streams again |
 
-If a step cannot be run — wrong hardware, Apple Intelligence unavailable — say
-so explicitly rather than skipping it silently.
+### Driving this from a script
 
-### Why step 8 is scoped to a replacing translation
+Most of the table can be automated on a Mac that has granted the terminal **Accessibility** and
+**Screen Recording**, which is how the rows above were checked: `osascript -e 'tell application
+"System Events" to key code 6 using {shift down, control down}'` for the hot-key, a short `CGEvent`
+helper for clicks, `screencapture -x -R x,y,w,h` to look at the result, and
+`CGWindowListCopyWindowInfo` filtered by owner to assert the popover's frame against
+`NSScreen.visibleFrame`.
 
-`Replacer.copySelection()` snapshots the pasteboard and then overwrites it with
-a synthetic ⌘C. That snapshot is written back in exactly one place —
-`Replacer.replaceSelection(with:)` — and only two paths reach it: a translation
-with "Preview before replacing" off, and the **Replace** button in the preview
-dialog. Every other way out of a translation returns without restoring, leaving
-the copied selection on the clipboard:
+Two traps are worth knowing before trusting such a run:
 
-| Exit path | Clipboard afterwards |
-|---|---|
-| Translation replaces the selection (`⌥⌘T`, `⌥⌘I`, `⌥⌘P` with preview off) | Restored |
-| Preview dialog → **Replace** | Restored |
-| Preview dialog → **Copy** | Holds the translation — intended, the user asked for it |
-| Preview dialog → **Cancel** | Holds the copied selection |
-| Read mode (`⌥⌘E`) | Holds the copied selection |
-| Selection is only whitespace | Holds the copied selection |
-| Model returns an empty result | Holds the copied selection |
-| Translation fails or times out | Holds the copied selection |
+- **`keystroke "c" using command down` does not fire menu key equivalents.** Use the low-level form,
+  `key code 8 using {command down}`. A ⌘C test that silently does nothing looks exactly like the bug
+  it is meant to catch.
+- **Assert against a sentinel, not the previous value.** Copying text that the clipboard already held
+  proves nothing. Put a known string on the clipboard first and check it was replaced.
 
-Pressing a shortcut with genuinely nothing selected is the one benign case: the
-pasteboard never changes, so `copySelection()` returns `nil` after its poll
-window and there is nothing to restore.
-
-This is read from the code, not reproduced — it needs confirming on a supported
-Mac. It reads like a bug rather than a decision, and it is written down here so
-that step 8 does not assert behaviour the app does not have. Do not widen step 8
-back to "any translation" unless the restore is extended to those paths; that is
-a change to `Sources/`, which needs its own plan under
-[`docs/plans/`](../../plans/README.md).
+If a step cannot be run — wrong hardware, Apple Intelligence unavailable, no password manager
+installed — say so explicitly rather than skipping it silently.
 
 ---
 
@@ -227,13 +215,46 @@ a change to `Sources/`, which needs its own plan under
 
 Stating these keeps anyone from assuming they are covered:
 
-- The Accessibility permission flow and its TCC interaction.
-- Code signing and whether the grant survives a rebuild.
-- Launch at Login (`SMAppService`) registration.
+- The popover: anchoring, focus, Escape, transient dismissal, and the toggle.
+- The hot-key: registration, rebinding, and the silent failure when another app owns the combination.
+- Streaming: that snapshots arrive progressively, and that the timeout and the single retry behave.
+- The clipboard read policy at runtime, including the nspasteboard markers.
+- The editing key equivalents, and therefore whether the main menu is installed at all.
+- Code signing, and Launch at Login (`SMAppService`) registration.
 - Translation quality for any language.
 - Behaviour when the model is mid-download or the Mac is unsupported.
 
 Each of these is verified by hand, or by a user reporting it.
+
+## 8. Translation quality is not a bug report about the prompt
+
+The on-device model is small. On longer sentences it sometimes chooses an odd word for a term, or
+invents one outright. Before changing the instruction text in response, measure — a throwaway script
+against `FoundationModels` costs a minute and settles it. The one time this was done, the same sentence
+failed identically under the v1 110-word instruction, the current short one, greedy sampling and
+temperature 0.1, and with the source language named or auto-detected. Only the user's style guide fixed
+it, by pinning the term.
+
+So: reproduce with a script, compare variants, and only then touch the instruction. A prompt change that
+fixes one sentence and breaks another is the normal outcome, and without measurements you will not know
+that is what happened.
+
+Three things that measuring has already settled, so nobody spends the minute twice:
+
+- **The instruction's last line must name the target language.** Ending on a bare "output only the
+  translation" makes the model echo the source text back untranslated — four of eight phrases.
+- **Instruction length does not cost latency.** 36 words and 200 words gave the same time to first
+  token. Shorten for clarity, not for speed.
+- **Greedy decoding is genuinely deterministic**, six identical runs across different prewarm timings.
+  So if the app disagrees with your script, the *instruction differs* — check the style guide, which is
+  appended to it, before suspecting the model.
+
+A benchmark worth keeping to hand, one phrase per failure mode: a time reference
+("See you tomorrow at the office."), a question ("Can you send me the report tomorrow?"), a number
+("The two invoices are attached."), a negation with "yet" ("Please don't send the revised version
+yet."), modality ("She may arrive after lunch."), a place and past tense ("We discussed it with the
+legal team in London."), a request ("Could we tighten the second section?"), and a domain term
+("Please find the invoice in the appendix.").
 
 ---
 

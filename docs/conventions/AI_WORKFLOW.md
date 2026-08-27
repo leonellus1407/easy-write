@@ -1,10 +1,10 @@
 # AI Workflow — guide for AI agents
 
-> **Purpose.** Easy Write's value proposition is auditability: ten Swift files, no
-> dependencies, no network code, and a privacy promise a user can verify by
-> reading the source. That property is easy to destroy one convenient addition at
-> a time. This document is the process that protects it. It is required reading
-> for every AI agent working in this repository.
+> **Purpose.** Easy Write's value proposition is auditability: a dozen Swift
+> files, no dependencies, no network code, no permissions, and a privacy promise
+> a user can verify by reading the source. That property is easy to destroy one
+> convenient addition at a time. This document is the process that protects it.
+> It is required reading for every AI agent working in this repository.
 >
 > **Language rule for the repo:** every file — docs, README, code comments,
 > shell scripts, commit messages, and user-facing strings — is written in
@@ -22,16 +22,16 @@ blanks" by guessing.
 Every new AI session must read the following **before** the first code edit:
 
 1. `README.md` — what the product is and how a user runs it.
-2. `HOW_IT_WORKS.md` — architecture: the on-device engine, the in-place swap,
-   hot-keys, and the code-signing trick.
+2. `HOW_IT_WORKS.md` — architecture: the on-device engine, streaming and
+   prewarming, the clipboard rule, hot-keys, and the code-signing trick.
 3. `docs/AI_Overview.md` — orientation for AI agents.
 4. `docs/conventions/CODING_CONVENTIONS.md` — style, naming, concurrency,
    settings, error handling, prohibitions.
-5. `docs/conventions/testing/README.md` — how work is actually verified, and
-   why there is no test suite yet.
+5. `docs/conventions/testing/README.md` — how work is actually verified, what
+   the suite covers, and the much larger part it does not.
 6. **This document** (`docs/conventions/AI_WORKFLOW.md`).
-7. `SECURITY.md` — when touching the clipboard, permissions, or anything that
-   could move data.
+7. `SECURITY.md` — when touching the clipboard, permissions, the translation
+   cache, or anything that could move data.
 8. The relevant plan under `docs/plans/` (when working from a plan).
 9. The feature spec under `docs/requirements/` (when one exists for the feature
    you touch).
@@ -41,9 +41,9 @@ is large, hold a summary in working memory so you can answer "what does the doc
 say about X?" later in the session.
 
 Also read the actual Swift file you are about to change, end to end — not the
-hunk your search matched. Every file in `Sources/EasyWrite/` is small enough to
-fit in context, so there is no excuse for patching a function you have only seen
-a fragment of. Do not substitute an assumed file size for looking.
+hunk your search matched. Every file under `Sources/` is small enough to fit in
+context, so there is no excuse for patching a function you have only seen a
+fragment of. Do not substitute an assumed file size for looking.
 
 ---
 
@@ -53,18 +53,19 @@ This repository has no `.github/PULL_REQUEST_TEMPLATE.md`. Walk this list
 yourself before opening a PR or asking for review:
 
 - Which invariant am I introducing or preserving?
-- Does the change add any network call, dependency, log of user text, or
-  persisted content? (If yes: stop — see section 6.)
+- Does the change add any network call, dependency, log of user text, persisted
+  content, or permission request? (If yes: stop — see section 6.)
 - Did I `rg` for every caller of the API I changed?
 - Has every new `if` been classified (invariant / workaround / dead branch)?
-- Is the diff ≤ 50 added lines in every changed file under `Sources/EasyWrite/`?
+- Is the diff ≤ 50 added lines in every changed file under `Sources/`?
   (Section 3 — the budget covers Swift sources only.)
 - Does `swift build` finish with no new warnings?
 - Does `swift build -c release` succeed?
+- Does `./test.sh` pass, and did new pure logic get a test?
 - Did I run the manual smoke test from
   [`testing/README.md`](testing/README.md) on a supported Mac — or state
   plainly that I could not?
-- Is the clipboard snapshot/restore path still intact?
+- Is there still exactly one pasteboard write, and still no permission request?
 - Does the PR description say what a **user** will observe differently?
 
 "No answer" to any item means stop and resolve, not "commit and move on".
@@ -73,16 +74,18 @@ yourself before opening a PR or asking for review:
 
 ## 3. Diff-size budget
 
-**This budget applies to `Sources/EasyWrite/*.swift` and to nothing else.**
+**This budget applies to `Sources/**/*.swift` and to nothing else.**
 
 | Level | Threshold | Action |
 |---|---|---|
 | Soft | +50 added lines in one Swift file per commit | Justify in the PR description. |
 | Hard | +50 added lines in one Swift file across the whole PR | Do not breach without explicit agreement (a reviewer comment, or an explicit "yes, splitting is impossible because…"). |
 
-The budget is tight on purpose. The whole app is ten files; a 200-line addition
-to one of them is a new component wearing a trench coat. Split it into its own
-file — SwiftPM picks it up with no manifest edit.
+The budget is tight on purpose. The whole app is a dozen files; a 200-line
+addition to one of them is a new component wearing a trench coat. Split it into
+its own file — SwiftPM picks it up with no manifest edit. The popover is the
+worked example: it is three files, because a container, a layout and a state
+machine are three things, and each is legible alone.
 
 ### Why documentation is out of scope
 
@@ -114,18 +117,18 @@ For every new `if` / `switch` / `guard` / early return, classify it explicitly
   - Example: `guard !busy else { return }` guards single-flight translation.
 
 - **Workaround.** The condition works around a platform bug or limitation in
-  AppKit, Carbon, Foundation Models, or TCC. Then:
+  AppKit, Carbon, or Foundation Models. Then:
   - Comment `// workaround: <reason>`, with the observable symptom.
-  - Existing examples worth imitating: `.privateState` on the event source,
-    `.permissiveContentTransformations` on the model, the `usleep` pauses in
-    `Replacer`.
+  - Existing examples worth imitating: `.permissiveContentTransformations` on
+    the model, and `TranslatorPanel`'s refusal to reopen right after AppKit
+    dismissed the popover on the same click.
 
 - **Dead branch.** The condition guards against something that "shouldn't
   happen but just in case". Then:
   - Comment `// dead: <reason>`, or delete it.
   - Do not add a silent `return` that hides a bug. In this app the honest
-    failure mode is `NSSound.beep()` plus a flashed icon — visible, harmless,
-    and reportable.
+    failure mode is a message in the popover — visible, harmless, and
+    reportable.
 
 "Just-in-case `if`" is an anti-pattern. Every such check masks a bug elsewhere.
 
@@ -133,8 +136,9 @@ For every new `if` / `switch` / `guard` / early return, classify it explicitly
 
 ## 5. Reproduce before you fix
 
-There is no automated regression net (see
-[`testing/README.md`](testing/README.md)), so the burden of proof is on you:
+The automated net reaches only the pure logic (see
+[`testing/README.md`](testing/README.md)), so for anything else the burden of
+proof is on you:
 
 1. Reproduce the bug manually on a supported Mac and write down the exact
    steps and the observed wrong behaviour.
@@ -143,8 +147,9 @@ There is no automated regression net (see
 4. Put both, verbatim, in the PR description or the plan's `Details` block.
 
 If the fixed logic is pure (formatting, lookup, parsing, merging), add a real
-test instead — and add the test target if it does not exist yet, as a separate,
-declared piece of work.
+test instead. If it lives in `Sources/EasyWrite/` and cannot be tested there,
+moving it into `EasyWriteCore` is a change to the package layout — declare it
+rather than doing it silently.
 
 If you cannot run the app (wrong hardware, no Apple Intelligence), say so
 explicitly. Claiming "verified" for something you reasoned about rather than ran
@@ -164,18 +169,20 @@ An AI agent must not, on its own initiative:
 - Persist translated content anywhere.
 - Remove or weaken `.permissiveContentTransformations`; the default guardrails
   false-flag ordinary text for translation.
-- Remove the clipboard snapshot/restore around a swap.
+- Add a second pasteboard write, or move the one that exists out of
+  `Clipboard.write`.
+- Reintroduce `CGEvent` or any other synthetic input, or add an Accessibility
+  check. The app requests no permission, and that is a headline claim.
+- Stop honouring the nspasteboard concealed and transient markers by default.
 - Rewrite the architecture — SwiftUI `App` lifecycle, an actor-based redesign,
   a new dependency-injection layer.
 - Flip `.swiftLanguageMode(.v5)` to Swift 6 mode, change the minimum macOS
   version, or restructure the package targets.
 - Change conventions: 4 spaces → tabs, English → another language,
   main-actor-by-default → ad-hoc queues.
-- Touch `setup-signing.sh` or the signing logic in `build.sh` — a stable
-  identity is what keeps the user's Accessibility grant alive across rebuilds.
-- Edit `Info.plist` bundle identity (`CFBundleIdentifier`, `LSUIElement`) —
-  changing it silently invalidates existing users' Accessibility grant.
-- Add an entitlement or request a permission beyond Accessibility.
+- Touch `setup-signing.sh` or the signing logic in `build.sh`.
+- Edit `Info.plist` bundle identity (`CFBundleIdentifier`, `LSUIElement`).
+- Add an entitlement or request any permission at all.
 
 These prohibitions can only be lifted by an explicit instruction from the user in
 the current session.
@@ -198,23 +205,27 @@ repo has to static analysis — do not let them accumulate.
 ### Bundle and run
 
 ```bash
-./setup-signing.sh          # one-time: stable self-signed identity
+./setup-signing.sh          # optional, one-time: stable self-signed identity
 ./build.sh                  # release build → EasyWrite.app → codesign
 open EasyWrite.app
 ```
 
 `./build.sh` signs with the "Easy Write Self-Signed" identity when it exists and
-falls back to ad-hoc signing otherwise. Ad-hoc builds lose the Accessibility
-grant on every rebuild, so run `setup-signing.sh` once before iterating on
-anything that drives the keyboard.
+falls back to ad-hoc signing otherwise, whose signature changes on every build.
+With no permission to lose that no longer costs a grant, but a stable identity is
+still the better default.
 
 ### Tests
 
 ```bash
-swift test                  # currently runs nothing — there is no test target
+./test.sh                   # the suite; wraps `swift test`
+./test.sh --filter TranslationCacheTests
 ```
 
-See [`testing/README.md`](testing/README.md) before writing any.
+Use `./test.sh` rather than `swift test` directly: with only the Command Line
+Tools installed, `swift test` cannot find the swift-testing framework. See
+[`testing/README.md`](testing/README.md) before writing any tests, and be precise
+about what passing them does and does not prove.
 
 ### Static analysis and formatting
 

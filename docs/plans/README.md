@@ -22,10 +22,10 @@ agreement.
 | Invariant | Why it exists |
 |---|---|
 | No network code, no dependencies, no telemetry | The privacy promise is the product, and it is only credible because it is verifiable by reading the source |
-| The clipboard is snapshotted before a swap and restored after | The user's clipboard is borrowed, never taken |
-| Translated text is never logged or persisted | Content lives in memory for one translation; only settings persist |
-| Accessibility is the only permission requested | Anything more breaks the claim in `SECURITY.md` |
-| A failure beeps or explains — it never crashes | The app runs unattended in the menu bar |
+| Easy Write reads the pasteboard and never writes it, except in the single code path behind the popover's Copy button | The user's clipboard is theirs. One call site is a promise you can check by counting, and a test does the counting |
+| Translated text is never logged or persisted | The cache is in memory, capped, and dies with the process; only settings persist |
+| No permission is requested at all | Anything more breaks the headline claim in `SECURITY.md` and `README.md` |
+| A failure explains itself — it never crashes | The app runs unattended in the menu bar |
 | Model calls are bounded by a timeout | A stalled request must not wedge the app |
 
 A plan that adds a check *inside* the failure path when the real fix belongs at
@@ -55,7 +55,7 @@ record. Do not delete it.
 
 `{N}_{descriptive-kebab-case-name}.md` — `N` is an ID, not a priority.
 
-- `1_reader-panel-focus-handling.md`
+- `1_popover-focus-handling.md`
 - `2_shortcut-recorder-edge-cases.md`
 
 One plan is one flat Markdown file, directly in this directory. Do not create a
@@ -85,14 +85,15 @@ another one, link to it instead of restating it.
 
 ### Evidence
 
-This app cannot be exercised on CI, and it has no test suite (see
+This app cannot be exercised on CI, and its test suite reaches only the pure
+logic (see
 [`docs/conventions/testing/README.md`](../conventions/testing/README.md)). So a
 plan must be explicit about where each claim comes from:
 
 - **"Reproduced"** means you ran the built app on a supported Mac and saw the
   behaviour. Record the exact steps and the observed result.
 - **"Read from the code"** means exactly that. Cite the file and line:
-  `Sources/EasyWrite/Replacer.swift:31`.
+  `Sources/EasyWrite/Clipboard.swift:27`.
 
 Mixing the two silently is the fastest way to ship a fix for a bug that was
 never there.

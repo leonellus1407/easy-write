@@ -1,3 +1,4 @@
+import EasyWriteCore
 import Foundation
 import SwiftUI
 
@@ -7,27 +8,34 @@ final class Store: ObservableObject {
     static let shared = Store()
     private let d = UserDefaults.standard
 
-    /// Set by AppDelegate to re-register hot-keys / rebuild the menu when settings change.
+    /// Set by AppDelegate to re-register hot-keys when the binding changes.
     var onChange: (() -> Void)?
 
     struct Shortcut: Codable, Equatable { var keyCode: UInt32; var modifiers: UInt32 }
 
     static let defaultShortcuts: [String: Shortcut] = [
-        "formal":   .init(keyCode: 17, modifiers: 2304),  // ⌥⌘T
-        "informal": .init(keyCode: 34, modifiers: 2304),  // ⌥⌘I
-        "plain":    .init(keyCode: 35, modifiers: 2304),  // ⌥⌘P
-        "english":  .init(keyCode: 14, modifiers: 2304),  // ⌥⌘E
+        "translate": .init(keyCode: 6, modifiers: 4608),  // ⇧⌃Z
     ]
 
-    @Published var targetCode: String { didSet { d.set(targetCode, forKey: "targetLanguageCode"); onChange?() } }
-    @Published var previewBeforeReplace: Bool { didSet { d.set(previewBeforeReplace, forKey: "previewBeforeReplace"); onChange?() } }
+    @Published var sourceCode: String { didSet { d.set(sourceCode, forKey: "sourceLanguageCode") } }
+    @Published var targetCode: String { didSet { d.set(targetCode, forKey: "targetLanguageCode") } }
     @Published var styleGuide: String { didSet { d.set(styleGuide, forKey: "styleGuide") } }
+    /// No `onChange?()`: the popover is transient, so opening Preferences dismisses it and the
+    /// next open reads this afresh.
+    @Published var engine: String { didSet { d.set(engine, forKey: "translationEngine") } }
+    @Published var ignoresPrivateClipboard: Bool {
+        didSet { d.set(ignoresPrivateClipboard, forKey: "ignoresPrivateClipboard") }
+    }
     @Published private var shortcuts: [String: Shortcut] { didSet { saveShortcuts(); onChange?() } }
 
     private init() {
+        sourceCode = d.string(forKey: "sourceLanguageCode") ?? "auto"
         targetCode = d.string(forKey: "targetLanguageCode") ?? "de"
-        previewBeforeReplace = d.bool(forKey: "previewBeforeReplace")
         styleGuide = d.string(forKey: "styleGuide") ?? ""
+        // Absent for everyone upgrading, so they keep the engine they already had.
+        engine = d.string(forKey: "translationEngine") ?? Engine.intelligence.rawValue
+        // Defaults to on, so a fresh install protects a copied password without being asked.
+        ignoresPrivateClipboard = d.object(forKey: "ignoresPrivateClipboard") as? Bool ?? true
         if let data = d.data(forKey: "shortcuts"),
            let decoded = try? JSONDecoder().decode([String: Shortcut].self, from: data) {
             var merged = Store.defaultShortcuts
@@ -38,10 +46,8 @@ final class Store: ObservableObject {
         }
     }
 
-    var targetLanguage: Locale.Language { Locale.Language(identifier: targetCode) }
-
     func shortcut(for action: String) -> Shortcut {
-        shortcuts[action] ?? Store.defaultShortcuts[action] ?? .init(keyCode: 17, modifiers: 2304)
+        shortcuts[action] ?? Store.defaultShortcuts[action] ?? .init(keyCode: 6, modifiers: 4608)
     }
 
     func setShortcut(_ s: Shortcut, for action: String) { shortcuts[action] = s }
