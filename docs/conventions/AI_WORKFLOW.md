@@ -236,7 +236,7 @@ own PR.
 
 ### Platform constraint
 
-The app builds and runs only on macOS 26+ with Apple Silicon. On any other
+The app builds and runs only on macOS 26.4+ with Apple Silicon. On any other
 machine you can read and edit the code but cannot compile or verify it. Say so
 rather than implying you built it.
 

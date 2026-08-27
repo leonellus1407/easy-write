@@ -24,23 +24,25 @@ How we write, verify, and release the code.
   classify a new `if`, reproduce-before-fix, what must never change without
   explicit instruction, and when to stop and ask.
 - [conventions/testing/README.md](conventions/testing/README.md) — the testing
-  guide. **This repo has no test target and no CI**; the doc explains what is
-  verified today, why the automatable surface is small, how to add a test target,
-  what to test first, and the manual smoke test that is the real acceptance gate.
+  guide. **This repo has a small unit-test suite and no CI**; the doc explains
+  what is verified today, why the automatable surface is small, what each test
+  protects, what to cover next, the manual smoke test that is the real acceptance
+  gate, and what measuring has already settled about translation quality.
 - [conventions/RELEASE_NOTES_GUIDE.md](conventions/RELEASE_NOTES_GUIDE.md) — how
   to turn a branch into a `CHANGELOG.md` entry and a GitHub Release body:
   behaviour over implementation, what must never appear, and the version bump.
 
 ## Specs & plans
 
-Two directories with two different jobs. Both currently hold only their README
-(and the template), because no work items have been written yet.
+Two directories with two different jobs.
 
 - [requirements/](requirements/README.md) — specifications for **new** features.
-  Start from [requirements/0_TEMPLATE.md](requirements/0_TEMPLATE.md).
+  Start from [requirements/0_TEMPLATE.md](requirements/0_TEMPLATE.md). Three are
+  written: the popover translator, the clipboard read-only invariant, and Apple
+  Translate as a second engine.
 - [plans/](plans/README.md) — plans for fixes, refactors, and cleanup of **code
   that already exists**, plus the cross-cutting invariants any such plan must
-  preserve.
+  preserve. Currently only its README.
 
 The writing rules for both are enforced by the rules in `.cursor/rules/`.
 
@@ -52,7 +54,7 @@ them when reorganising this tree.
 
 | File | Used for |
 |---|---|
-| `demo.gif` | The animated walkthrough embedded in the README |
+| `demo.gif` | Nothing, currently. It animates version 1's in-place replacement, which the app no longer does, so the README stopped embedding it rather than ship a false demo. A recording of the popover is needed to replace it ([#6](https://github.com/leonellus1407/easy-write/issues/6)) |
 | `icon.png` | The app icon shown in the README header |
 | `social-preview.jpg` | The GitHub repository social preview card |
 
@@ -75,7 +77,7 @@ them rather than restating them here.
 - **No database schema reference.** There is no database. The only persistence is
   `UserDefaults`, documented in
   [conventions/CODING_CONVENTIONS.md](conventions/CODING_CONVENTIONS.md#settings--persistence).
-- **No test inventory.** There are no tests to inventory. When a test target
-  exists, its inventory belongs in
-  [conventions/testing/README.md](conventions/testing/README.md), not in a
-  separate summary that would drift out of date.
+- **No separate test inventory.** What each test protects is listed in
+  [conventions/testing/README.md](conventions/testing/README.md), next to the
+  reasons the rest of the app has no automated coverage. A second summary here
+  would only drift out of date.

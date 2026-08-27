@@ -8,7 +8,7 @@ The writing rules for a plan are enforced by `.cursor/rules/plan-conventions.mdc
 and always apply, including in Plan mode. This file covers where plans live, how
 they are named, and what a finished one looks like.
 
-This directory holds only this README until the first plan is written.
+This directory currently holds only this README.
 
 ---
 
@@ -48,6 +48,13 @@ Every item in a plan carries one of:
 
 When a plan is finished, its file **stays** in this directory as a historical
 record. Do not delete it.
+
+There is one exception, and it is narrow: a **parking list** — a file that only
+holds deferred work and settles nothing. Once every line of it is done, or has
+moved to an issue that outlives it, there is no decision left for it to record,
+so it goes rather than becoming a page of ticked boxes. A plan that decided
+anything stays, however small the decision, because the reasoning is the record.
+If you are unsure which kind you have, keep it.
 
 ---
 

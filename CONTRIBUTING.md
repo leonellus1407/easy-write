@@ -12,7 +12,8 @@ that way are very welcome.
 open EasyWrite.app
 ```
 
-Requires macOS 26+ on Apple Silicon with Apple Intelligence enabled. See
+Requires macOS 26.4+ on Apple Silicon. Apple Intelligence has to be enabled to exercise the default
+engine; Apple Translate works without it, so a full manual pass wants both. See
 [HOW_IT_WORKS.md](HOW_IT_WORKS.md) for an architecture tour before diving in.
 
 ## Good first contributions

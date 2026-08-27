@@ -156,7 +156,7 @@ honestly how the feature will be verified:
    lookup, parsing, merging — it goes in `EasyWriteCore` and it gets a test.
    If it does not, say so, and say why the logic could not go there.
 3. **Manual verification**: `./build.sh && open EasyWrite.app`, then the steps
-   below, run on macOS 26+ / Apple Silicon with Apple Intelligence enabled.
+   below, run on macOS 26.4+ / Apple Silicon with Apple Intelligence enabled.
 
 Manual steps specific to this feature:
 
@@ -231,7 +231,7 @@ Point at the closest existing implementation instead of inventing a pattern:
   A typo in the type string silently disables the check.
 - The package uses Swift 6 tools with `.swiftLanguageMode(.v5)`; strict Swift 6
   concurrency checking is not enforced by the compiler.
-- Builds and runs on macOS 26+ / Apple Silicon only.
+- Builds and runs on macOS 26.4+ / Apple Silicon only.
 
 ## References
 
