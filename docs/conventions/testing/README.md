@@ -239,6 +239,23 @@ So: reproduce with a script, compare variants, and only then touch the instructi
 fixes one sentence and breaks another is the normal outcome, and without measurements you will not know
 that is what happened.
 
+Three things that measuring has already settled, so nobody spends the minute twice:
+
+- **The instruction's last line must name the target language.** Ending on a bare "output only the
+  translation" makes the model echo the source text back untranslated — four of eight phrases.
+- **Instruction length does not cost latency.** 36 words and 200 words gave the same time to first
+  token. Shorten for clarity, not for speed.
+- **Greedy decoding is genuinely deterministic**, six identical runs across different prewarm timings.
+  So if the app disagrees with your script, the *instruction differs* — check the style guide, which is
+  appended to it, before suspecting the model.
+
+A benchmark worth keeping to hand, one phrase per failure mode: a time reference
+("See you tomorrow at the office."), a question ("Can you send me the report tomorrow?"), a number
+("The two invoices are attached."), a negation with "yet" ("Please don't send the revised version
+yet."), modality ("She may arrive after lunch."), a place and past tense ("We discussed it with the
+legal team in London."), a request ("Could we tighten the second section?"), and a domain term
+("Please find the invoice in the appendix.").
+
 ---
 
 ## Related documents

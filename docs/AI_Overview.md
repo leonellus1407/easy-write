@@ -134,8 +134,13 @@ Each request builds an instruction from the source and target language, an optio
 carried by the language table, and the user's optional style guide, which is appended last and told to
 take precedence. The instruction also frames the user's text as content to be translated rather than
 as a request to answer, which is what keeps the model from replying to a clipboard that happens to be
-a question. It is deliberately short — a long instruction is tokens the model has to read before it
-can start.
+a question.
+
+Two measured facts about that instruction are worth knowing before editing it. **Its last line must
+name the target language.** Ending on a bare "output only the translation" makes the model echo the
+source text back untranslated — four of eight benchmark phrases, against none once the language is
+named again at the end. And **length costs almost nothing**: going from 36 words to 200 did not move
+the time to first token, so shortening it is not a latency lever.
 
 The public call returns a stream of cumulative snapshots. Three things make it fast: streaming, so the
 user reads the first words instead of waiting for the whole answer; greedy sampling, which is the

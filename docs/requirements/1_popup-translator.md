@@ -350,10 +350,13 @@ Speed is the headline requirement, in rough order of effect:
   instead of waiting for the whole answer.
 - **Make prewarming real.** See Step 2: the current warm session is discarded
   unused, so every translation is a cold start today.
-- **Shorten the instruction.** The current one runs about 110 words
-  (`Sources/EasyWrite/LLMTranslator.swift:127-134`) and the register paragraph
-  that dominates it is being deleted anyway. Target roughly 35 words: the text
-  is content, not a request, and the output is the translation alone.
+- **The instruction's length is not a speed lever, and it must end by naming the
+  target language.** Both measured on a supported Mac: 36 words and 200 words
+  produce the same time to first token, so the register paragraph that dominated
+  the v1 instruction was worth deleting for clarity, not for latency. Ending on a
+  bare "output only the translation", though, makes the model echo the source text
+  back untranslated — four of eight benchmark phrases, none once the language is
+  named again at the end. Whatever the instruction says, that closing line stays.
 - **`GenerationOptions(sampling: .greedy)`.** The cheapest decode path, and
   determinism is what makes a cache trustworthy. `maximumResponseTokens` is a
   runaway guard only, scaled to input length — Apple's TN3193 warns it truncates
