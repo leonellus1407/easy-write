@@ -11,17 +11,20 @@ that they cannot do now, and why does it matter? One paragraph.
 
 List every file that will be created or modified, with one line on why:
 
-- `Sources/EasyWrite/XyzPanel.swift` — new floating panel that presents ...
-- `Sources/EasyWrite/AppDelegate.swift` — new menu item and hot-key registration for ...
+- `Sources/EasyWrite/XyzPanel.swift` — new surface that presents ...
+- `Sources/EasyWrite/AppDelegate.swift` — hot-key registration for ...
 - `Sources/EasyWrite/Store.swift` — new persisted setting `...`
 - `Sources/EasyWrite/PreferencesController.swift` — control for the new setting
-- `Sources/EasyWrite/Languages.swift` — new language row
+- `Sources/EasyWriteCore/Languages.swift` — new language row
+- `Tests/EasyWriteCoreTests/...Tests.swift` — cover the new pure logic
 - `Info.plist` — version bump
 - `CHANGELOG.md` — release entry
 
-Remember: a new `.swift` file in `Sources/EasyWrite/` needs **no** `Package.swift`
-edit — SwiftPM globs the directory. Only a new **system framework** needs a
-`linkerSettings` entry.
+Remember: a new `.swift` file in `Sources/EasyWrite/` or `Sources/EasyWriteCore/`
+needs **no** `Package.swift` edit — SwiftPM globs both directories. Only a new
+**system framework** needs a `linkerSettings` entry. Pure logic belongs in
+`EasyWriteCore`, where it can be tested; anything importing AppKit or
+FoundationModels belongs in `EasyWrite`.
 
 ### Settings & Persistence Changes
 
@@ -54,8 +57,9 @@ existing responsibility it takes over.
 
 #### Step 3: User interface
 
-- Menu-bar changes in `AppDelegate.rebuildMenu()` (AppKit)
+- Popover changes in `TranslatorView` (SwiftUI)
 - Preferences changes in `PreferencesView` (SwiftUI)
+- Status-item changes in `AppDelegate` (AppKit)
 - Any new window or panel: state whether it takes focus, and why
 
 #### Step 4: Hot-key wiring (if applicable)
@@ -78,18 +82,14 @@ Quote the patterns this feature should imitate. Real examples from the codebase:
 ```
 
 ```swift
-// Async work from the main actor, with a reentrancy guard
-guard !busy else { return }
-busy = true
-setIcon(busy: true)
-Task { @MainActor in
-    defer { busy = false }
-    do {
-        let result = try await llm.translate(text, toLanguageNamed: language, register: register)
-        // ...
-    } catch {
-        NSSound.beep(); flashIcon("exclamationmark.bubble", revertAfter: 1.1)
-    }
+// Async work from the main actor: cancel the previous request rather than queueing another,
+// and carry a generation number so a superseded run cannot write over a newer one's state
+task?.cancel()
+generation += 1
+let mine = generation
+task = Task { [weak self] in
+    guard let self, !Task.isCancelled else { return }
+    await self.run(mine)
 }
 ```
 
@@ -114,21 +114,22 @@ try await withThrowingTaskGroup(of: String.self) { group in
 
 ### Edge Cases & Error Handling
 
-- [ ] Empty or whitespace-only selection → single beep, no dialog, no crash
-- [ ] Model unavailable → the specific explanatory dialog, not a generic one
-- [ ] Model times out → icon flashes, app stays responsive
-- [ ] Accessibility permission missing → prompt, then abort cleanly
-- [ ] Action triggered while one is already running → ignored, not queued
+- [ ] Empty or whitespace-only text → empty panes, no model call, no crash
+- [ ] Clipboard holds no text representation (image, file) → panes stay empty
+- [ ] Clipboard marked concealed or transient → treated as nothing to translate, and never cached
+- [ ] Model unavailable → the specific explanatory message, not a generic one
+- [ ] Model times out → the popover shows a failed state and stays responsive; the timeout is never retried
+- [ ] Action triggered while one is already running → the previous request is cancelled, not queued
 - [ ] Unknown or removed stored value → falls back to a sane default
-- [ ] Target application is slow or handles copy unusually → fails visibly, clipboard intact
+- [ ] Hot-key already claimed by another app → registration fails silently; the status icon still works
 
 ### User Experience
 
 - [ ] All strings are English, sentence case, typographic punctuation, no emoji
-- [ ] Menu labels show the current shortcut
-- [ ] Feedback is visible without a Dock icon (status-bar icon change or beep)
+- [ ] Preferences shows the current shortcut, and rebinding it persists
+- [ ] Feedback is visible without a Dock icon (in the popover, or on the status-bar icon)
 - [ ] A window that needs focus activates the app; anything else does not steal focus
-- [ ] Floating windows are clamped to the visible screen frame
+- [ ] Popovers and floating windows are clamped to the visible screen frame
 
 ### Privacy Impact
 
@@ -138,24 +139,24 @@ Non-negotiable. Every box must be checked, or the feature does not ship:
 - [ ] No third-party dependency added to `Package.swift`
 - [ ] No analytics, telemetry, or crash reporting
 - [ ] No `print` / `os_log`, and no persistence of translated text
-- [ ] Clipboard snapshot-and-restore preserved on every path that touches the pasteboard
-- [ ] No permission requested beyond Accessibility
+- [ ] Easy Write still reads the pasteboard and never writes it, except in the single code path behind the popover's Copy button
+- [ ] No permission is requested at all
 - [ ] Statements in `SECURITY.md` remain true (if not, that file must change too, and that is a separate decision)
 
 ## Development Information
 
 ### Testing Strategy
 
-This repo has **no test target and no CI** — see
+There is a small test suite covering `EasyWriteCore` and **no CI** — see
 [`docs/conventions/testing/README.md`](../conventions/testing/README.md). State
 honestly how the feature will be verified:
 
 1. **Compile**: `swift build` warning-free, and `swift build -c release`.
-2. **Manual verification**: `./build.sh && open EasyWrite.app`, then the steps
+2. **Automated**: `./test.sh`. If the feature adds pure logic — formatting,
+   lookup, parsing, merging — it goes in `EasyWriteCore` and it gets a test.
+   If it does not, say so, and say why the logic could not go there.
+3. **Manual verification**: `./build.sh && open EasyWrite.app`, then the steps
    below, run on macOS 26+ / Apple Silicon with Apple Intelligence enabled.
-3. **Automated** (only if the feature adds pure logic — formatting, lookup,
-   parsing, merging): note that a test target must be added first, and treat
-   that as its own declared piece of work.
 
 Manual steps specific to this feature:
 
@@ -165,7 +166,7 @@ Manual steps specific to this feature:
 | 2 | ... | ... |
 
 Also re-run the relevant rows of the standard smoke test if this feature touches
-the translate path, the clipboard, hot-keys, or settings.
+the translate path, the clipboard, the hot-key, or settings.
 
 If you cannot run the app on suitable hardware, say so explicitly rather than
 implying it was verified.
@@ -174,30 +175,37 @@ implying it was verified.
 
 Point at the closest existing implementation instead of inventing a pattern:
 
-- Non-activating floating popup: `ReaderPanel.swift`
-- Modal dialog with actions, and re-activating the previous app: `AppDelegate.presentResult`
+- Popover anchored to the status item, taking focus deliberately: `TranslatorPanel`
+- SwiftUI hosted in an AppKit container: `PreferencesController.show()`
+- Streaming a model response into a view: `LLMTranslator.translate` and `TranslatorModel.run`
 - Reason-specific user-facing error copy: `LLMTranslator.Unavailable`
 - Persisted collection with a merge-on-load upgrade path: `Store.shortcuts`
 - Key capture with modifier validation and Escape to cancel: `Recorder`
 - Pure static lookup table with a fallback: `Languages`
+- An invariant enforced by scanning the sources: `Tests/EasyWriteCoreTests/PasteboardWriteGuardTests.swift`
 
 ### Considerations
 
 #### Privacy & security
 
-- Untrusted input: the selection is fed to a language model, so any new
+- Untrusted input: the clipboard text is fed to a language model, so any new
   instruction text must keep framing it as content, not as a request to answer.
-- Never widen the permission surface. Accessibility is the only grant.
+- Never widen the permission surface. The app requests nothing, and that is a
+  headline claim in `README.md` and `SECURITY.md`.
 - Do not weaken `.permissiveContentTransformations`; the default guardrails
   false-flag ordinary text for translation.
+- Do not add a second pasteboard write, and do not reintroduce a synthetic
+  keystroke to make some later convenience work.
 
 #### Performance
 
-- Keep the first-use path warm; do not undo `llm.prewarm()`.
+- Keep the first-use path warm; do not undo `prewarm()`. A warm session is the
+  difference between a first token at 2.4 s and at 0.25 s, and it is warmed for
+  one instruction string only.
 - Bound every model call with a timeout.
-- The short `usleep` waits in `Replacer` are load-bearing — do not lengthen or
-  remove them without measuring.
-- Dismiss transient UI automatically rather than leaving it on screen.
+- Stream anything the user waits on, rather than showing it all at once.
+- Debounce anything driven by typing, and cancel the previous request instead of
+  queueing another.
 
 #### Maintainability
 
@@ -210,16 +218,17 @@ Point at the closest existing implementation instead of inventing a pattern:
 
 #### Known Gotchas
 
-- Changing `CFBundleIdentifier` or the signing identity invalidates the user's
-  existing Accessibility grant.
-- Ad-hoc signing loses the Accessibility grant on every rebuild — run
-  `./setup-signing.sh` once before iterating on anything that drives the keyboard.
-- Hot-key registration fails silently when a combination is already claimed by
-  another app.
+- Assigning `statusItem.menu` swallows the click that has to reach the button's
+  action, so the popover would never open from the icon.
+- AppKit dismisses a transient popover on the same click that then reaches the
+  status button, so a naive toggle closes and immediately reopens it.
 - The app is `LSUIElement`: there is no Dock icon and it is usually not frontmost,
-  so a window that needs focus must call `NSApp.activate(ignoringOtherApps: true)`.
-- Synthetic keystrokes need a `.privateState` event source so physically-held
-  modifiers do not contaminate them.
+  so anything that needs keyboard focus must call
+  `NSApp.activate(ignoringOtherApps: true)`.
+- `LanguageModelSession` is stateful and its transcript grows across turns —
+  rebuild it per turn rather than reusing one.
+- The `org.nspasteboard.*` markers are a developer convention, not an Apple API.
+  A typo in the type string silently disables the check.
 - The package uses Swift 6 tools with `.swiftLanguageMode(.v5)`; strict Swift 6
   concurrency checking is not enforced by the compiler.
 - Builds and runs on macOS 26+ / Apple Silicon only.

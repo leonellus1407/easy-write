@@ -21,10 +21,10 @@ which types were touched or how the code is arranged.
 
 ### Forbidden content
 
-- **Type names** — `LLMTranslator`, `HotKeyCenter`, `ReaderPanel`
-- **Method or property names** — `translate(_:toLanguageNamed:)`, `rebuildMenu()`
+- **Type names** — `LLMTranslator`, `HotKeyCenter`, `TranslatorPanel`
+- **Method or property names** — `translate(_:from:to:styleGuide:)`, `copyOutput()`
 - **File names or paths** — `Sources/EasyWrite/Store.swift`
-- **UserDefaults keys or other code tokens** — `previewBeforeReplace`, `keyCode: 17`
+- **UserDefaults keys or other code tokens** — `ignoresPrivateClipboard`, `keyCode: 6`
 - **Internal mechanics** — "moved to a task group", "extracted a helper",
   "switched from a closure to a delegate"
 
@@ -50,7 +50,8 @@ purely because it is what you used does not.
 |---|---|
 | Added `note:` field to the `Lang` struct | Arabic now produces Modern Standard Arabic rather than mixed dialect |
 | Wrapped the model call in `withThrowingTaskGroup` | A stalled translation no longer leaves the app stuck; it times out and lets you retry |
-| Refactored `AppDelegate.rebuildMenu()` | (omit — internal refactor with no user-visible effect) |
+| Reused the prewarmed `LanguageModelSession` | The first words of a translation now appear in a quarter of a second instead of two |
+| Extracted `EasyWriteCore` and added a test target | (omit — repository housekeeping) |
 | Reads `SystemLanguageModel.availability` and maps each reason | The app now tells you *why* Apple Intelligence isn't available — unsupported Mac, turned off, or still downloading |
 | Bumped `CFBundleVersion` to 3 | (omit — build bookkeeping) |
 

@@ -15,7 +15,7 @@ Full conventions: `docs/conventions/CODING_CONVENTIONS.md`
 ```swift
 // GOOD
 Store.shared.targetCode = code
-let sc = Store.shared.shortcut(for: "formal")
+let sc = Store.shared.shortcut(for: "translate")
 
 // BAD — skips persistence and the onChange hook that re-registers hot-keys
 UserDefaults.standard.set(code, forKey: "targetLanguageCode")
@@ -28,18 +28,20 @@ A new setting is a `@Published` property on `Store` whose `didSet` writes to `Us
 ```swift
 // GOOD
 @MainActor
-final class ReaderPanel { /* ... */ }
+final class TranslatorPanel { /* ... */ }
 
-Task { @MainActor in
-    defer { busy = false }
-    let result = try await llm.translate(text, toLanguageNamed: language, register: register)
-}
+// Cancel and supersede rather than queueing; the generation number stops a cancelled
+// request writing state after a newer one started.
+task?.cancel()
+generation += 1
+let mine = generation
+task = Task { [weak self] in await self?.run(mine) }
 
 // BAD — background queue touching UI state
 DispatchQueue.global().async { self.statusItem.button?.image = image }
 ```
 
-`HotKeyCenter` is the one non-isolated class: it is driven by a Carbon C callback and hops back with `DispatchQueue.main.async` before calling app code. SwiftUI views are `struct`s and static-only namespaces (`KeyDisplay`, `Languages`) need no isolation, so neither belongs in that count. Pure helpers may be `nonisolated static func`. Escaping closures that outlive the call capture `[weak self]`.
+`HotKeyCenter` is the one non-isolated class: it is driven by a Carbon C callback and hops back with `DispatchQueue.main.async` before calling app code. SwiftUI views are `struct`s and static-only namespaces (`KeyDisplay`, `Languages`) need no isolation, so neither belongs in that count. Pure helpers, and helpers that must run off the main actor, may be `nonisolated static func` (see `LLMTranslator.stream`). Escaping closures that outlive the call capture `[weak self]`.
 
 ### Long-running model calls race a timeout
 
@@ -52,36 +54,36 @@ try await withThrowingTaskGroup(of: String.self) { group in
 }
 ```
 
-A stalled request must never wedge the app. Retry transient errors once; never retry a timeout or a cancellation.
+A stalled request must never wedge the app. Retry transient errors once; never retry a timeout or a cancellation. When the call streams, retry only while nothing has been emitted — retrying mid-stream duplicates words already on screen.
 
 ### Failure is feedback, not a crash
 
 ```swift
-// GOOD — transient failure
-NSSound.beep(); flashIcon("exclamationmark.bubble", revertAfter: 1.1)
+// GOOD — the popover is open, so it explains itself there
+setPhase(.failed("The translation took too long and was stopped. Try again."))
 
-// GOOD — user-actionable failure
-notify(reason.message)          // NSAlert with a specific, fixable explanation
+// GOOD — user-actionable failure with no popover on screen
+notify(error.localizedDescription)   // NSAlert with a specific, fixable explanation
 
 // BAD
 try! SMAppService.mainApp.register()
 ```
 
-No `try!`, no `fatalError`. Use `try?` for best-effort side effects, `do`/`catch` + `NSAlert` when the user can fix it. Model framework enums get `@unknown default`.
+No `try!`, no `fatalError`. Use `try?` for best-effort side effects, `do`/`catch` + `NSAlert` when the user can fix it and nothing else can carry the message. Model framework enums get `@unknown default`.
 
 ### Privacy is a hard invariant
 
-No `URLSession`, no sockets, no analytics, no `print`/`os_log` of user text, no third-party packages. The clipboard is snapshotted before a swap and restored after.
+No `URLSession`, no sockets, no analytics, no `print`/`os_log` of user text, no third-party packages, and **no permission requested at all** — no `CGEvent`, no Accessibility check. Easy Write reads the pasteboard and never writes it, except in `Clipboard.write` behind the popover's Copy button; a test fails the build if a second write appears.
 
 ### Comments — explain WHY, not WHAT
 
 ```swift
 // GOOD — decodes a magic number
-postCmd(virtualKey: 8)      // 8 = C
+.init(keyCode: 6, modifiers: 4608),   // ⇧⌃Z
 
 // GOOD — records a platform gotcha
-// .privateState => our synthetic events ignore physically-held modifier keys
-private let source = CGEventSource(stateID: .privateState)
+// Assigning a menu would swallow the click that has to reach the button's action.
+statusItem.menu = nil
 
 // BAD — narrates the next line
 // set the busy icon
@@ -96,8 +98,8 @@ Use `///` doc comments on types and non-obvious methods to state the contract or
 
 ### Types
 
-`final class` for reference types, `struct` for values, `enum` for closed sets and for static-only namespaces (`KeyDisplay`, `Languages`). Singletons are `static let shared` with a `private init()`.
+`final class` for reference types, `struct` for values, `enum` for closed sets and for static-only namespaces (`KeyDisplay`, `Languages`, `Clipboard`). Singletons are `static let shared` with a `private init()`.
 
 ### Files and frameworks
 
-One primary type per file, named after it; a small satellite (a SwiftUI view for its controller) may share the file. Drop new `.swift` files straight into `Sources/EasyWrite/` — SPM globs the directory, so no manifest edit is needed. A new **system framework** does need a `linkerSettings` entry in `Package.swift`.
+One primary type per file, named after it; a small satellite (a SwiftUI view for its controller) may share the file. Drop new `.swift` files straight into `Sources/EasyWriteCore/` if they are pure logic, or `Sources/EasyWrite/` if they touch AppKit or the model — SPM globs both directories, so no manifest edit is needed. A type in `EasyWriteCore` that the app uses must be `public`. A new **system framework** does need a `linkerSettings` entry in `Package.swift`.

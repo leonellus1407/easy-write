@@ -33,25 +33,22 @@ afterwards. This file stays under `docs/requirements/` rather than moving to
 use, and because it specifies a standing guarantee and a new read policy rather
 than a patch.
 
-## Open Questions in the Upstream Spec
+## Questions Settled Before Implementation
 
-Two gaps in [`1_popup-translator.md`](1_popup-translator.md), recorded here
-because this document depends on it. **Neither is a work item owned by this
-file.** Both belong upstream and should be settled there before v2 is
-implemented; they are listed as inherited risk, not as scope.
+Two gaps in [`1_popup-translator.md`](1_popup-translator.md) were recorded here
+because this document depends on it. Both were decided by the user before any code
+was written, and both are now closed:
 
-- **What happens to an edited left pane on reopen.** The upstream spec has
-  `togglePopup()` re-read the clipboard every time the popover opens, and it also
-  has an edit to the left pane trigger a retranslation. It does not say which of
-  those wins when the user edits the pane, closes the popover, and reopens it: as
-  written, the re-read silently overwrites the edit. That needs deciding upstream.
-- **`.cursor/rules/swift-code-standards.mdc` is absent from the upstream file
-  list.** The popup spec enumerates the documentation and packaging files its work
-  touches but omits that rule file, which states the clipboard rule at line 74 and
-  uses `ReaderPanel` as an example type at line 31 — and `ReaderPanel.swift` is
-  one of the files the popup spec deletes. Step 1 below covers line 74 as a
-  consequence; the stale example type, and the file's absence from the upstream
-  list, are covered nowhere.
+- **An edited left pane survives a reopen.** The popover re-reads the clipboard
+  only when the clipboard has changed since the last read, tracked by
+  `NSPasteboard.changeCount`. Copying something new therefore replaces the pane,
+  and reopening on an unchanged clipboard keeps whatever the user typed. The Copy
+  button records the change count of its own write, so pressing Copy does not make
+  the translation look like new clipboard content on the next open
+  (`Sources/EasyWrite/TranslatorModel.swift:70` and `:92`).
+- **`.cursor/rules/swift-code-standards.mdc` is covered here.** Step 1 covers the
+  clipboard rule; the stale `ReaderPanel` example in the same file is fixed in the
+  same pass, along with the other stale example types listed there.
 
 ## Technical Specification
 
@@ -98,13 +95,17 @@ than for one phrasing:
 
 Code:
 
-- The popover's clipboard read. `1_popup-translator.md` does not pin down which
-  type performs it — only that `togglePopup()` re-reads on open. Wherever it
-  lands, `TranslatorModel` or the `AppDelegate` toggle, it must be a single
-  function, so the read policy in Step 3 has one place to live.
-- `.github/workflows/ci.yml` — one added step, **if** the workflow in flight on
-  `ci/add-tests-and-workflow` has landed by then. If it has not, the guard is a
-  checklist line instead and this part drops.
+- `Sources/EasyWrite/Clipboard.swift` — the app's entire pasteboard surface: one
+  function that reads and one that writes, plus the two `NSPasteboard.PasteboardType`
+  markers the read checks. `1_popup-translator.md` left the location open, asking
+  only that the read be a single function; a file that holds both sides makes the
+  invariant a claim about one file rather than about control flow.
+- `Sources/EasyWrite/Store.swift` and `PreferencesController.swift` — the setting
+  behind the Step 3 decision.
+- `Tests/EasyWriteCoreTests/PasteboardWriteGuardTests.swift` — the guard from
+  Step 2. The workflow in flight on `ci/add-tests-and-workflow` has **not** landed
+  on `main`, so the guard is a test rather than a CI step: it runs under
+  `./test.sh`, needs no runner, and fails by naming the offending function.
 
 Already scheduled elsewhere, and therefore deliberately **not** in scope here:
 `SECURITY.md`, `README.md`, `HOW_IT_WORKS.md`, `docs/AI_Overview.md`,
@@ -123,9 +124,16 @@ the smoke test.
 
 ### Settings & Persistence Changes
 
-**None.** No new key, no change to `Store`, no migration, nothing new in
-`UserDefaults`. An existing user sees no upgrade behaviour, because no stored
-state is involved.
+One key, added by the Step 3 decision.
+
+| Key | Type | Default | Triggers `onChange?()` | Why |
+|---|---|---|---|---|
+| `ignoresPrivateClipboard` | `Bool` | `true` | no | The read function checks it each time; nothing else depends on it |
+
+The default is `true`, so a fresh install protects a copied password without being
+asked. Because `UserDefaults.bool(forKey:)` cannot tell "off" from "absent", `Store`
+reads it as `d.object(forKey:) as? Bool ?? true`. An existing user gets the
+protective default on first launch after the update and can turn it off.
 
 ### Implementation Details
 
@@ -190,12 +198,22 @@ Nothing leaves the Mac, so this is not an exfiltration bug. It is the same
 judgement the popup spec already makes in keeping the cache in memory: the app
 should not surface content whose source explicitly asked tools not to read it.
 
-**Recommendation:** treat either marker as "no usable text". That state is already
-specified — empty panes, no model call — so the behaviour is indistinguishable
-from the image case and costs a few lines in the read function. Seeding it anyway,
-on the grounds that the user pressed the hot-key deliberately, is defensible; if
-that is chosen it should be chosen explicitly and written down here rather than
-arrived at by omission. Either way a concealed read must never reach the cache.
+**Decision:** either marker means "no usable text", and a checkbox in Preferences
+lets the user opt out. The checkbox is on by default, so the protective behaviour
+is what everyone gets without choosing it, and the state is already specified —
+empty panes, no model call — so declining is indistinguishable from the image case
+and costs three lines in the read function.
+
+The reason for making it a setting rather than a fixed rule is that the marker is
+a convention, not a guarantee, and the app cannot tell a password from an
+application being over-cautious with something the user genuinely wants
+translated. A user who hits that has no other way out: the app would silently show
+empty panes for text that is plainly on their clipboard. The escape hatch is one
+checkbox, off the default path, and it cannot weaken the write invariant — that
+one has no setting, because a promise with an off switch is not a promise.
+
+A declined read reaches nothing: the input pane stays empty, so no key is ever
+built and the cache is never consulted or written.
 
 ### Code Patterns to Follow
 
@@ -215,37 +233,37 @@ extension NSPasteboard.PasteboardType {
 
 ### Functional Requirements
 
-- [ ] All nine locations listed under Components Affected state the read-only invariant, or lose their stale example; none still describes snapshot-and-restore
-- [ ] A repo-wide grep for the restore concept (snapshot, restore, borrowed, pasteboard, clipboard) across `docs/**`, `.cursor/**` and the root Markdown files returns no surviving description of the deleted mechanism
-- [ ] A spec written from `0_TEMPLATE.md` after v2 can complete its privacy checklist truthfully
-- [ ] Exactly one code path under `Sources/` writes the pasteboard, and it is behind the popover's **Copy** button
-- [ ] The grep guard fails a pull request that adds a second pasteboard write
-- [ ] The Step 3 decision is recorded in this file with its reason, whichever way it goes
+- [x] All nine locations listed under Components Affected state the read-only invariant, or lose their stale example; none still describes snapshot-and-restore
+- [x] A repo-wide grep for the restore concept (snapshot, restore, borrowed, pasteboard, clipboard) across `docs/**`, `.cursor/**` and the root Markdown files returns no surviving description of the deleted mechanism
+- [x] A spec written from `0_TEMPLATE.md` after v2 can complete its privacy checklist truthfully
+- [x] Exactly one code path under `Sources/` writes the pasteboard, and it is behind the popover's **Copy** button
+- [x] The guard fails a pull request that adds a second pasteboard write — demonstrated by adding a second write, watching the test fail and name it, then reverting
+- [x] The Step 3 decision is recorded in this file with its reason
 
 ### Edge Cases & Error Handling
 
-- [ ] Pasteboard marked `org.nspasteboard.ConcealedType` → per the Step 3 decision, and never cached
-- [ ] Pasteboard marked `org.nspasteboard.TransientType` → same
-- [ ] Marker present but no string representation → already the empty case; no new branch needed
-- [ ] Marker present on a later open after an ordinary first open → the decision applies per read, not per session
-- [ ] Copy button pressed → the pasteboard is written, and this is the one exemption, not a loophole
+- [x] Pasteboard marked `org.nspasteboard.ConcealedType` → empty panes, no model call, nothing cached. Run on a supported Mac: with a concealed string on the pasteboard the app produced no translation and left the pasteboard untouched; with the setting off it translated normally
+- [x] Pasteboard marked `org.nspasteboard.TransientType` → same, and it is the same call: one `availableType(from: [.concealed, .transient])` covers both markers, so there is no second branch to test
+- [x] Marker present but no string representation → already the empty case; no new branch added
+- [x] Marker present on a later open after an ordinary first open → the check lives in the read function, which runs per open, so the decision applies per read
+- [x] Copy button pressed → the pasteboard is written, and this is the one exemption, not a loophole
 
 ### User Experience
 
-- [ ] Declining to read produces the same empty popover as an image: no new string, no dialog, no beep
-- [ ] If a string is added anyway it is English, sentence case, typographic punctuation, no emoji
+- [x] Declining to read produces the same empty popover as an image: no new string, no dialog, no beep
+- [x] The one new string, the Preferences checkbox and its caption, is English, sentence case, typographic punctuation, no emoji
 
 ### Privacy Impact
 
 Non-negotiable. Every box must be checked, or the work does not ship:
 
-- [ ] No network code added (`URLSession`, sockets, or otherwise)
-- [ ] No third-party dependency added to `Package.swift`
-- [ ] No analytics, telemetry, or crash reporting
-- [ ] No `print` / `os_log`, and no persistence of translated text
-- [ ] The pasteboard is read and never written, outside the **Copy** path
-- [ ] No permission is requested at all
-- [ ] Statements in `SECURITY.md` remain true — v2 rewrites that file, and this work must not make the rewrite false again
+- [x] No network code added (`URLSession`, sockets, or otherwise)
+- [x] No third-party dependency added to `Package.swift`
+- [x] No analytics, telemetry, or crash reporting
+- [x] No `print` / `os_log`, and no persistence of translated text
+- [x] The pasteboard is read and never written, outside the **Copy** path
+- [x] No permission is requested at all
+- [x] Statements in `SECURITY.md` remain true
 
 ## Out of Scope
 
@@ -256,11 +274,9 @@ Non-negotiable. Every box must be checked, or the work does not ship:
   all scheduled by [`1_popup-translator.md`](1_popup-translator.md).
 - The popover itself: streaming, the cache, the language row, the hot-key.
   [`1_popup-translator.md`](1_popup-translator.md) owns all of it.
-- Both items under "Open Questions in the Upstream Spec" above. They are recorded
-  so they are not lost, and they are owned upstream.
-- Adding the test target or the CI workflow. In flight on
-  `ci/add-tests-and-workflow`; this document only adds one step to a workflow that
-  exists by then.
+- The CI workflow. Still in flight on `ci/add-tests-and-workflow`; the guard here
+  is a test, so it does not wait on a runner. When that branch lands, `swift test`
+  in its workflow picks the guard up with no further change.
 
 ## Development Information
 
@@ -268,23 +284,39 @@ Non-negotiable. Every box must be checked, or the work does not ship:
 
 1. **Compile**: `swift build` warning-free, then `swift build -c release`. The
    documentation edits need no build.
-2. **Automated**: the grep guard from Step 2 *is* the test for the write
-   invariant. The read policy is not unit-testable under this repo's own rule —
+2. **Automated**: the guard from Step 2 *is* the test for the write invariant. The
+   read policy is not unit-testable under this repo's own rule —
    [`testing/README.md`](../conventions/testing/README.md) forbids a unit test
-   from touching `NSPasteboard.general`.
+   from touching `NSPasteboard.general` — so it was exercised by running the built
+   app instead.
 3. **Manual verification**: `./build.sh && open EasyWrite.app` on macOS 26+ /
    Apple Silicon.
 
 | # | Step | Expected |
 |---|---|---|
-| 1 | Copy a password from a password manager, press `⇧⌃Z` | Per the Step 3 decision; with the recommendation, empty panes and no model call |
-| 2 | Copy ordinary text, press `⇧⌃Z` | Normal behaviour, unchanged |
-| 3 | Translate, press **Copy**, wait 5 s, ⌘V elsewhere | The translation pastes; nothing has overwritten it |
-| 4 | Translate without pressing **Copy**, then ⌘V elsewhere | The pre-existing clipboard content pastes; the app wrote nothing |
+| 1 | Copy a password from a password manager, press `⇧⌃Z` | Empty panes and no model call |
+| 2 | Uncheck "Ignore private clipboard content", repeat step 1 | It reads and translates normally |
+| 3 | Copy ordinary text, press `⇧⌃Z` | Normal behaviour |
+| 4 | Translate, press **Copy**, wait 5 s, ⌘V elsewhere | The translation pastes; nothing has overwritten it |
+| 5 | Translate without pressing **Copy**, then ⌘V elsewhere | The pre-existing clipboard content pastes; the app wrote nothing |
 
-**This document was written on Linux. Nothing in it has been compiled or run.**
-The package is macOS 26+ / Apple Silicon only. Every claim about the current
-repository is read from the files at the cited lines.
+### What was actually run
+
+On macOS 26.5.2, Apple Silicon, Apple Intelligence available. `swift build` and
+`swift build -c release` are warning-free and `./test.sh` passes.
+
+Steps 1–5 above were run against the built bundle, driven from a temporary hook in
+`applicationDidFinishLaunching` that opened the popover, waited, pressed Copy and
+quit — because macOS denies this environment both synthetic keystrokes and screen
+capture, so the popover cannot be driven by hand from here. The hook was removed
+before committing. Observed: a concealed pasteboard produced no translation and no
+write; the same pasteboard with the setting off produced a Russian translation;
+ordinary text produced a correct translation; and a translation without pressing
+Copy left the original clipboard text in place.
+
+What that does **not** cover: that the popover is positioned and rendered
+correctly, and that Escape and click-outside dismiss it. Those need a human on a
+supported Mac.
 
 ### Considerations
 
@@ -298,8 +330,9 @@ repository is read from the files at the cited lines.
   `1_popup-translator.md` gives the same warning about synthetic keystrokes; the
   guard in Step 2 is what turns both warnings into something a reviewer cannot
   miss.
-- Do not add a setting for any of this. A promise with an off switch is not a
-  promise.
+- The write invariant has no setting, and must not gain one. The read policy does,
+  for the reason recorded in Step 3 — a marker the app cannot verify is a different
+  kind of rule from a call site it can count.
 
 #### Maintainability
 
@@ -324,10 +357,10 @@ repository is read from the files at the cited lines.
 ### Unresolved
 
 - Whether macOS 26 surfaces any system indication — a notification, a prompt —
-  when an application reads the general pasteboard without a paste gesture. This
-  could not be checked from Linux, and it changes how visible the popover's
-  read-on-open is to the user. Confirm on a supported Mac before calling this
-  done.
+  when an application reads the general pasteboard without a paste gesture. No
+  prompt appeared across the runs recorded above, and the app requests no
+  permission, but those runs did not watch for a passive indicator such as a menu
+  bar glyph. Worth a look during the manual pass.
 
 ## References
 
@@ -348,4 +381,5 @@ repository is read from the files at the cited lines.
 ---
 
 **Created**: 2026-08-26
-**Status**: Planning
+**Status**: In Progress — implemented and verified as recorded above; the popover's
+on-screen behaviour still needs a human on a supported Mac

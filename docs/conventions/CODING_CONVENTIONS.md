@@ -6,9 +6,9 @@
 
 - **docs/conventions/CODING_CONVENTIONS.md** (this file) — code style, naming, concurrency, settings, error handling
 - **README.md** — product overview, install, usage
-- **HOW_IT_WORKS.md** — architecture tour: the on-device engine, the in-place swap, hot-keys, signing
+- **HOW_IT_WORKS.md** — architecture tour: the on-device engine, streaming and prewarming, the clipboard rule, hot-keys, signing
 - **docs/AI_Overview.md** — orientation for AI agents
-- **docs/conventions/testing/README.md** — testing guide (and the current absence of a test target)
+- **docs/conventions/testing/README.md** — testing guide: what the suite covers, and the much larger part it does not
 - **docs/conventions/AI_WORKFLOW.md** — workflow and guardrails for AI agents
 - **docs/conventions/RELEASE_NOTES_GUIDE.md** — how to write a release entry
 - **SECURITY.md** — data flow and permissions
@@ -40,10 +40,10 @@
 ### 1. Code Philosophy
 
 - **Clarity over cleverness**: the app is small enough for a stranger to audit in one sitting. Keep it that way.
-- **Small surface**: the whole app is ten files under `Sources/EasyWrite/`. Prefer extending an existing type over adding a new one.
+- **Small surface**: the whole app is a dozen files under `Sources/`. Prefer extending an existing type over adding a new one.
 - **No dependencies**: `Package.swift` declares no `dependencies:`. Standard library and Apple frameworks only.
-- **Private by default**: privacy is the product. A change that adds a network call, a log of user text, or a third-party SDK is out of scope regardless of how useful it is.
-- **Fail softly**: a failed translation beeps and flashes an icon. It never crashes, and never leaves the user's clipboard or selection damaged.
+- **Private by default**: privacy is the product. A change that adds a network call, a log of user text, a permission request, or a third-party SDK is out of scope regardless of how useful it is.
+- **Fail softly**: a failed translation says why, in the popover. It never crashes, and never touches the user's clipboard.
 
 ### 2. Language & Encoding
 
@@ -87,19 +87,19 @@ struct ThingView: View { }          // 9. small satellite types may follow
 - **Single-line bodies** are fine for trivial members and keep the file scannable:
 
 ```swift
-@objc func menuPlain() { translate(register: nil) }
+@objc func menuQuit() { NSApp.terminate(nil) }
 static func keyLabel(_ code: UInt32) -> String { keyNames[code] ?? "·" }
-var isAvailable: Bool { unavailableReason == nil }
+var canSwap: Bool { sourceCode != Languages.auto.code }
 ```
 
 ### 3. Types
 
 | Use | For | Examples |
 |---|---|---|
-| `final class` | reference types with identity or AppKit lifetime | `AppDelegate`, `Store`, `Replacer`, `ReaderPanel` |
-| `struct` | values | `Lang`, `Store.Shortcut`, `TimeoutError` |
-| `enum` (no cases) | static-only namespaces | `KeyDisplay`, `Languages` |
-| `enum` (cases) | closed sets, especially where each case carries user-facing copy | `LLMTranslator.Register`, `LLMTranslator.Unavailable` |
+| `final class` | reference types with identity or AppKit lifetime | `AppDelegate`, `Store`, `LLMTranslator`, `TranslatorPanel` |
+| `struct` | values | `Lang`, `Store.Shortcut`, `TranslationCache.Key`, `TimeoutError` |
+| `enum` (no cases) | static-only namespaces | `KeyDisplay`, `Languages`, `Clipboard` |
+| `enum` (cases) | closed sets, especially where each case carries user-facing copy | `TranslatorModel.Phase`, `LLMTranslator.Unavailable` |
 
 Classes are `final` unless something actually subclasses them. Singletons are `static let shared` with a `private init()`.
 
@@ -111,12 +111,12 @@ Keep user-facing copy next to the case that produces it, as `Unavailable.message
 
 ### 1. Main-actor by default
 
-Every class that owns app state or the lifetime of an AppKit object is `@MainActor final class`: `AppDelegate`, `Store`, `LLMTranslator`, `Replacer`, `ReaderPanel`, `PreferencesController`, `Recorder`.
+Every class that owns app state or the lifetime of an AppKit object is `@MainActor final class`: `AppDelegate`, `Store`, `LLMTranslator`, `TranslatorPanel`, `TranslatorModel`, `TranslationCache`, `PreferencesController`, `Recorder`.
 
 The rule is about isolating mutable state, not about turning every SwiftUI-adjacent type into a class. Two categories sit outside it deliberately, and converting them would be wrong:
 
-- **SwiftUI views** — `PreferencesView` and `ReaderHUDView` are `struct`s, as views must be. SwiftUI already isolates a `View` body to the main actor, so they get the guarantee without the annotation, even though both touch SwiftUI and `PreferencesView` holds `Store`.
-- **Static-only namespaces and value types** — `KeyDisplay`, `Languages`, `Lang`, `Store.Shortcut`. They carry no mutable state, so they need no isolation, even where they take an AppKit type as a parameter.
+- **SwiftUI views** — `PreferencesView` and `TranslatorView` are `struct`s, as views must be. SwiftUI already isolates a `View` body to the main actor, so they get the guarantee without the annotation, even though both touch SwiftUI and both hold an observable object.
+- **Static-only namespaces and value types** — `KeyDisplay`, `Languages`, `Lang`, `Store.Shortcut`. They carry no mutable state, so they need no isolation, even where they take an AppKit type as a parameter. (`Clipboard` is a namespace too, but it is `@MainActor` because it touches `NSPasteboard`.)
 
 Among the state-owning classes, the single exception is `HotKeyCenter`. It is registered from a Carbon C callback that fires on an unspecified context, so it is a plain `final class` and hops back before calling app code:
 
@@ -124,7 +124,7 @@ Among the state-owning classes, the single exception is `HotKeyCenter`. It is re
 DispatchQueue.main.async { HotKeyCenter.shared.fire(id) }
 ```
 
-Do not add more exceptions. If a helper is genuinely pure, mark it `nonisolated static func` (see `LLMTranslator.clean`) rather than making the whole type non-isolated.
+Do not add more exceptions. If a helper is genuinely pure, or has to run off the main actor, mark it `nonisolated static func` (see `LLMTranslator.clean` and `LLMTranslator.stream`) rather than making the whole type non-isolated.
 
 ### 2. Entry point
 
@@ -132,17 +132,19 @@ Do not add more exceptions. If a helper is genuinely pure, mark it `nonisolated 
 
 ### 3. Async work
 
-Start async work with `Task { @MainActor in … }` from the main actor, and clear reentrancy flags with `defer`:
+Start async work with `Task { … }` from the main actor. Where a user can trigger the same work again before the first one finishes, **cancel and supersede** rather than queueing or refusing — and carry a generation number so the cancelled run cannot write state after the newer one has started:
 
 ```swift
-busy = true
-Task { @MainActor in
-    defer { busy = false }
-    // ...
+task?.cancel()
+generation += 1
+let mine = generation
+task = Task { [weak self] in
+    guard let self, !Task.isCancelled else { return }
+    await self.run(mine)          // every state write inside re-checks `mine == generation`
 }
 ```
 
-Guard user-triggered actions that must not overlap with a plain flag (`guard !busy else { return }`), rather than a lock.
+The check is needed because cancellation surfaces asynchronously: without it, a superseded request's failure path would overwrite the phase a newer request has already set. Where overlap is genuinely impossible rather than merely undesirable, a plain flag is still fine; do not reach for a lock.
 
 ### 4. Timeouts and retries
 
@@ -157,11 +159,11 @@ try await withThrowingTaskGroup(of: String.self) { group in
 }
 ```
 
-Transient errors retry once with a short backoff. A `TimeoutError` or a `CancellationError` is rethrown immediately — never retried.
+Transient errors retry once with a short backoff. A `TimeoutError` or a `CancellationError` is rethrown immediately — never retried. When the call streams, the retry is additionally conditional on nothing having been emitted yet: retrying mid-stream would duplicate the words already on screen.
 
 ### 5. Delayed UI and closures
 
-Use `DispatchQueue.main.asyncAfter` for short UI delays (icon revert, clipboard restore). Escaping closures that outlive the call capture `[weak self]` and `guard let self else { return }`.
+Use `DispatchQueue.main.asyncAfter` for a short UI delay, or `Task.sleep(for:)` inside a cancellable `Task` when the delay is part of async work that a later action should supersede — that is what makes the popover's typing debounce cancel cleanly. Escaping closures that outlive the call capture `[weak self]` and `guard let self else { return }`.
 
 ### 6. Language mode
 
@@ -173,19 +175,20 @@ The package uses the Swift 6 tools version with `.swiftLanguageMode(.v5)`. Stric
 
 ### 1. Types
 
-- **UpperCamelCase**: `LLMTranslator`, `HotKeyCenter`, `ReaderPanel`.
+- **UpperCamelCase**: `LLMTranslator`, `HotKeyCenter`, `TranslatorPanel`.
 - **Descriptive suffixes** already in use:
   - `*Controller`: owns a window or UI lifecycle (`PreferencesController`)
-  - `*Panel` / `*View`: AppKit panel and SwiftUI view (`ReaderPanel`, `ReaderHUDView`)
+  - `*Panel` / `*View` / `*Model`: AppKit container, SwiftUI view, and the observable state behind them (`TranslatorPanel`, `TranslatorView`, `TranslatorModel`)
   - `*Center`: process-wide registry (`HotKeyCenter`)
-  - `*Translator`, `*Replacer`, `*Recorder`: agent nouns for the thing that performs the action
+  - `*Cache`: bounded in-memory store (`TranslationCache`)
+  - `*Translator`, `*Recorder`: agent nouns for the thing that performs the action
 
 ### 2. Members
 
 - **lowerCamelCase** for properties and methods.
-- **Action verbs** on methods: `translate`, `register`, `copySelection`, `replaceSelection`, `rebuildMenu`, `prewarm`, `show`, `close`.
-- **Booleans** read as assertions: `isAvailable`, `busy`, `installed`, `previewBeforeReplace`.
-- **`@objc` menu targets** are prefixed by their role: `menuFormal`, `menuPreferences`, `menuQuit`, `togglePreview`, `toggleLaunchAtLogin`.
+- **Action verbs** on methods: `translate`, `register`, `prewarm`, `retranslate`, `swap`, `read`, `write`, `show`, `close`, `toggle`.
+- **Booleans** read as assertions: `isAvailable`, `isTranslating`, `canSwap`, `installed`, `ignoresPrivateClipboard`.
+- **`@objc` action targets** are named for what they do: `togglePopup`, `toggleLaunchAtLogin`.
 - **Private helpers** are `private func` and sit below the API they serve.
 
 ### 3. Local names
@@ -197,12 +200,11 @@ Short names are acceptable when the scope is a few lines and the type is obvious
 Use argument labels that make the call site read as a sentence:
 
 ```swift
-func translate(_ text: String, toLanguageNamed language: String,
-               register: Register?, styleGuide: String? = nil,
-               languageNote: String? = nil) async throws -> String
+func translate(_ text: String, from source: Lang, to target: Lang,
+               styleGuide: String) -> AsyncThrowingStream<String, Error>
 
-func flashIcon(_ symbol: String, revertAfter seconds: Double)
-func show(_ text: String, at screenPoint: NSPoint)
+static func read(ignoringPrivateContent ignorePrivate: Bool) -> String?
+func toggle(relativeTo button: NSStatusBarButton, willShow: () -> Void)
 ```
 
 ---
@@ -212,12 +214,15 @@ func show(_ text: String, at screenPoint: NSPoint)
 ### 1. Directory Structure
 
 ```
-Package.swift              # SPM manifest — one executable target, Carbon linked
+Package.swift              # SPM manifest — core library, executable, test target; Carbon linked
 Info.plist                 # bundle metadata: version, LSUIElement, min OS
 build.sh                   # release build → EasyWrite.app → codesign
+test.sh                    # unit tests (wraps `swift test`)
 setup-signing.sh           # one-time stable self-signed identity
 make-icon.swift            # throwaway script that renders AppIcon artwork
-Sources/EasyWrite/         # all application code
+Sources/EasyWriteCore/     # pure logic: no AppKit, no FoundationModels, unit tested
+Sources/EasyWrite/         # everything with a UI or a model call
+Tests/EasyWriteCoreTests/  # the suite
 docs/                      # documentation and README images
 .github/ISSUE_TEMPLATE/    # bug report + feature request forms
 ```
@@ -226,7 +231,7 @@ For the responsibility of each source file, see the file map in [HOW_IT_WORKS.md
 
 ### 2. File Naming
 
-- Swift files are UpperCamelCase, named after the primary type: `ReaderPanel.swift` → `final class ReaderPanel`.
+- Swift files are UpperCamelCase, named after the primary type: `TranslatorPanel.swift` → `final class TranslatorPanel`.
 - `main.swift` is the one lowercase exception; SwiftPM requires that name for top-level code.
 
 ### 3. One Primary Type Per File
@@ -234,17 +239,19 @@ For the responsibility of each source file, see the file map in [HOW_IT_WORKS.md
 Each file holds one primary type. A small satellite that only exists to serve it may share the file:
 
 - `PreferencesController.swift` — `Recorder`, `PreferencesController`, `PreferencesView`
-- `ReaderPanel.swift` — `ReaderPanel`, `ReaderHUDView`
 - `Languages.swift` — `Lang`, `Languages`
+- `Clipboard.swift` — `Clipboard`, and the `NSPasteboard.PasteboardType` markers it checks
 
-Split the file when the satellite grows its own reason to exist.
+Split the file when the satellite grows its own reason to exist. `TranslatorPanel`, `TranslatorView` and `TranslatorModel` are three files rather than one for exactly that reason: a popover is a container, a layout, and a state machine, and each is legible alone.
 
 ### 4. Adding Files and Frameworks
 
-**This is not like a manifest-driven project.** SwiftPM globs `Sources/EasyWrite`, so:
+**This is not like a manifest-driven project.** SwiftPM globs both source directories, so:
 
-1. Create the `.swift` file in `Sources/EasyWrite/`.
+1. Create the `.swift` file in `Sources/EasyWriteCore/` if it is pure logic, or `Sources/EasyWrite/` if it touches AppKit or the model.
 2. That's it — no manifest edit, no include list, no import registration.
+
+A type in `EasyWriteCore` that the app uses must be `public`, and the app file that uses it needs `import EasyWriteCore`.
 
 A new **system framework** does need a manifest change:
 
@@ -254,7 +261,7 @@ linkerSettings: [
 ]
 ```
 
-Most Apple frameworks (AppKit, SwiftUI, Foundation, FoundationModels, ServiceManagement, CoreGraphics, ApplicationServices) link automatically from `import` alone. Carbon is listed explicitly because the hot-key API needs it.
+Most Apple frameworks (AppKit, SwiftUI, Foundation, FoundationModels, ServiceManagement) link automatically from `import` alone. Carbon is listed explicitly because the hot-key API needs it.
 
 ---
 
@@ -265,21 +272,21 @@ Most Apple frameworks (AppKit, SwiftUI, Foundation, FoundationModels, ServiceMan
 ### 1. The pattern
 
 ```swift
-@Published var targetCode: String {
-    didSet { d.set(targetCode, forKey: "targetLanguageCode"); onChange?() }
+@Published private var shortcuts: [String: Shortcut] {
+    didSet { saveShortcuts(); onChange?() }
 }
 ```
 
 - `@Published` so SwiftUI updates.
 - `didSet` writes through to `UserDefaults` immediately — there is no explicit save step.
-- `onChange?()` is called when the menu or the hot-key registrations depend on the value. `AppDelegate` installs that hook in `applicationDidFinishLaunching` and responds by re-registering hot-keys and rebuilding the menu.
-- Omit `onChange?()` for settings nothing needs to react to (`styleGuide` is read at translation time).
+- `onChange?()` is called when the hot-key registrations depend on the value. `AppDelegate` installs that hook in `applicationDidFinishLaunching` and responds by re-registering.
+- Omit `onChange?()` for settings nothing needs to react to — `styleGuide` and the language codes are read when they are needed, and the popover reacts to its own edits.
 
 ### 2. Reading settings
 
 ```swift
 // GOOD
-let sc = Store.shared.shortcut(for: "formal")
+let sc = Store.shared.shortcut(for: "translate")
 Store.shared.targetCode = code
 
 // BAD — bypasses persistence and the change hook
@@ -303,22 +310,22 @@ Complex values are stored as JSON via `Codable` (`[String: Shortcut]`). Keys are
 ### 4. Adding a setting
 
 1. Add the `@Published` property with its `didSet` to `Store`.
-2. Add a default in `init`.
-3. Add the control to `PreferencesView`, and a menu item in `AppDelegate.rebuildMenu()` if it deserves one.
+2. Add a default in `init`. A setting that should default to `true` reads `d.object(forKey:) as? Bool ?? true`, because `d.bool(forKey:)` cannot tell "off" from "absent".
+3. Add the control to `PreferencesView`, or to the popover if the user changes it often.
 
 ### 5. Adding a shortcut action
 
 Three places, all of which must agree on the action key string:
 
 1. `Store.defaultShortcuts` — the default key code and Carbon modifier mask.
-2. `AppDelegate.registerHotKeys()` — the `register("key") { … }` line.
+2. `AppDelegate.registerHotKeys()` — the registration line.
 3. `PreferencesView.actions` — the row in the recorder list.
 
-Modifier masks are Carbon values from `KeyDisplay` (`cmd` 256, `option` 2048, `control` 4096, `shift` 512); `2304` is `⌥⌘`.
+Modifier masks are Carbon values from `KeyDisplay` (`cmd` 256, `option` 2048, `control` 4096, `shift` 512); `4608` is `⇧⌃`.
 
 ### 6. Adding a language
 
-`Languages.swift` only. Add a `Lang` with its code, English name, and the formal/informal second-person labels — or `nil` for both when the language has no single pronoun pair (English, Japanese, Chinese, Arabic). Use `note:` for per-language model guidance, as Arabic does for Modern Standard Arabic.
+`Sources/EasyWriteCore/Languages.swift` only. Add a `Lang` with its code and English name. Use `note:` for per-language model guidance, as Arabic does for Modern Standard Arabic. `Languages.all` is the target list; `Languages.auto` is a source-only sentinel and must never appear in it.
 
 ---
 
@@ -326,17 +333,17 @@ Modifier masks are Carbon values from `KeyDisplay` (`cmd` 256, `option` 2048, `c
 
 The app mixes both deliberately:
 
-- **AppKit** owns the shell: `NSStatusItem`, `NSMenu`, `NSAlert`, `NSPanel`, `NSWindow`, `NSPasteboard`, `CGEvent`.
-- **SwiftUI** owns rich content, hosted via `NSHostingController`: the preferences form and the reader HUD.
+- **AppKit** owns the shell: `NSStatusItem`, `NSPopover`, `NSAlert`, `NSWindow`, `NSPasteboard`.
+- **SwiftUI** owns rich content, hosted via `NSHostingController`: the popover and the preferences form.
 
-New settings UI goes in SwiftUI. Menu-bar chrome, dialogs, and anything positioned in screen coordinates stay AppKit.
+New UI goes in SwiftUI. Menu-bar chrome, dialogs, and anything positioned in screen coordinates stay AppKit.
 
 Because the app is `LSUIElement` with `.accessory` activation policy, it has no Dock icon and is usually not the active app. That has consequences to respect:
 
-- A window that needs focus must call `NSApp.activate(ignoringOtherApps: true)` first.
-- The reader popup deliberately does **not** take focus: `.nonactivatingPanel`, `becomesKeyOnlyIfNeeded = true`, and `orderFrontRegardless()`.
-- Before driving the keyboard, reactivate the app the user was actually in (`lastApp`), tracked via `NSWorkspace.didActivateApplicationNotification`.
-- Position floating windows against `NSScreen.visibleFrame` and clamp, so the popup is never half off-screen.
+- Anything that needs keyboard focus must call `NSApp.activate(ignoringOtherApps: true)` first. The popover does, because the user types in it.
+- `statusItem.menu` must stay `nil`. Assigning a menu swallows the click that has to reach the button's action, and the popover would never open from the icon.
+- A transient `NSPopover` is dismissed by AppKit on the same click that then reaches the status button, so a toggle has to refuse an open that arrives immediately after a close.
+- Anchor a popover with `show(relativeTo:of:preferredEdge:)` and let AppKit clamp it; position and clamp a plain window yourself against `NSScreen.visibleFrame`.
 
 ---
 
@@ -350,10 +357,12 @@ There is no `try!` and no `fatalError` in `Sources/EasyWrite/`. Keep it that way
 
 | Situation | Response | Example |
 |---|---|---|
-| Transient failure the user can just retry | `NSSound.beep()` + `flashIcon("exclamationmark.bubble", …)` | model error, timeout, empty result |
-| Nothing to act on | `NSSound.beep()` alone | empty selection |
-| User can fix it in Settings | `NSAlert` with a specific explanation | Apple Intelligence unavailable, Launch-at-Login failure |
+| Failure while the popover is open | a message in the right-hand pane | model error, timeout, empty result, Apple Intelligence unavailable |
+| Nothing to act on | nothing at all — empty panes, no model call | clipboard empty, holds an image, or is marked private |
+| User can fix it, and no popover is open | `NSAlert` with a specific explanation | Launch-at-Login failure |
 | Best-effort side effect | `try?`, no UI | `SMAppService.mainApp.register()` on first run |
+
+The popover is the app's voice. Because it is on screen whenever a translation runs, a failure has somewhere to be explained, which is why there are no beeps on the translation path and no modal dialogs.
 
 ### 3. Specific messages beat generic ones
 
@@ -374,9 +383,10 @@ Small and local: `struct TimeoutError: Error {}` inside the type that throws it.
 ```swift
 /// Single source of truth for user settings. ObservableObject so SwiftUI prefs bind to it.
 
-/// Copies the current selection and returns it as a string (or nil if nothing copied).
+/// Nil means there is nothing to translate: no text at all, or — when the user leaves the
+/// setting on — text whose source marked it as private or momentary.
 
-/// `register == nil` → plain translation that preserves the source's natural tone.
+/// Cumulative snapshots of the translation: every element is the whole text produced so far.
 ```
 
 There is no required tag block (no `@date`, no mandatory `@param`). A sentence that a reader could not have derived from the signature is the bar.
@@ -387,23 +397,22 @@ Comment only what the code cannot say for itself:
 
 ```swift
 // ✅ decodes a magic number
-postCmd(virtualKey: 8)      // 8 = C
-.init(keyCode: 17, modifiers: 2304),  // ⌥⌘T
+.init(keyCode: 6, modifiers: 4608),  // ⇧⌃Z
+try await Task.sleep(nanoseconds: 20_000_000_000)    // 20s
 
 // ✅ records a platform constraint
-// .privateState => our synthetic events ignore physically-held modifier keys
+// Assigning a menu would swallow the click that has to reach the button's action.
 
 // ✅ explains a product decision that the code alone doesn't justify
-// Read mode (→ English) always shows a popup, since you're usually reading
-// non-editable text (web pages, emails, PDFs) where paste-back can't work.
+// Our own write must not look like new clipboard content on the next open.
 
 // ❌ narrates the next line
 // set the busy icon
 setIcon(busy: true)
 
 // ❌ repeats the method name
-// rebuild the menu
-rebuildMenu()
+// prewarm the model
+prewarm()
 ```
 
 **When to comment**: magic numbers (key codes, modifier masks, timeouts), platform gotchas and workarounds, product decisions that look arbitrary in code, and anything an auditor would otherwise have to reverse-engineer.
@@ -412,7 +421,7 @@ rebuildMenu()
 
 ### 3. `// MARK:`
 
-Group sections in larger types, as `AppDelegate` does: `// MARK: Status item / menu`, `// MARK: Hot-keys`, `// MARK: Actions`, `// MARK: Helpers`.
+Group sections in larger types, as `AppDelegate` and `TranslatorModel` do: `// MARK: Status item`, `// MARK: Hot-keys`, `// MARK: Actions`, `// MARK: Translation`, `// MARK: Helpers`.
 
 ### 4. Documentation workflow
 
@@ -434,14 +443,14 @@ Update the authoritative document and link to it from elsewhere. Never copy-past
 
 ## Testing
 
-See [testing/README.md](testing/README.md) for the full picture, including the fact that **the repo currently has no test target** and how to add one.
+See [testing/README.md](testing/README.md) for the full picture.
 
 Short version:
 
-- The gate today is `swift build` (warning-free) plus a manual smoke test on a supported Mac.
-- Genuinely unit-testable surface is narrow: key-code formatting, language lookup, response cleaning, shortcut merge/decode.
-- `@MainActor` AppKit flows, synthetic keystrokes, and the on-device model cannot be covered by unit tests.
-- Do not describe a test suite that does not exist in PRs, plans, or docs.
+- The gates are `swift build` (warning-free), `./test.sh`, and a manual smoke test on a supported Mac. There is no CI, so nobody runs the tests but you.
+- The suite covers `EasyWriteCore` — language lookup and the translation cache — plus one test that scans the sources to prove only one function writes the pasteboard.
+- `@MainActor` AppKit flows, the popover, the hot-key, and the on-device model are **not** covered and cannot be.
+- Put new pure logic in `EasyWriteCore` so it can be tested, and be precise about what "tests pass" covers.
 
 ---
 
@@ -477,30 +486,32 @@ These are invariants, not preferences. `SECURITY.md` is the promise made to user
 
 1. **No network code.** No `URLSession`, no sockets, no third-party SDK that could open one. The absence is verifiable by grep, and that is the point.
 2. **No telemetry, analytics, or crash reporting.**
-3. **No logging of user text.** There is no `print` or `os_log` in `Sources/EasyWrite/`. Debug prints must not survive into a commit.
-4. **No persistence of translated content.** Selection text lives in memory for the length of one translation. Settings persist; content does not.
-5. **Clipboard is borrowed, not taken.** Snapshot every pasteboard item and type before a swap, restore afterwards.
-6. **Accessibility is the only permission.** Check with `AXIsProcessTrustedWithOptions` before driving the keyboard, and route the user to the right Settings pane when it is missing. Do not request any other entitlement.
-7. **No new dependencies.** Every added package is code the user can no longer audit in one sitting.
+3. **No logging of user text.** There is no `print` or `os_log` in `Sources/`. Debug prints must not survive into a commit.
+4. **No persistence of translated content.** The translation cache is in memory, capped at twenty entries, and dies with the process. Settings persist; content does not.
+5. **Easy Write reads the pasteboard and never writes it, except in the single code path behind the popover's Copy button.** That path is `Clipboard.write`, and `Tests/EasyWriteCoreTests/PasteboardWriteGuardTests.swift` fails if a second one appears. Like the network rule, this is enforced by counting rather than by remembering.
+6. **No permission at all.** There is no `CGEvent`, no Accessibility check, and no entitlement. The app reads the clipboard and registers a hot-key, neither of which needs a grant. Adding a feature that needs one is a product decision, not an implementation detail.
+7. **Content its source marked private is not read.** The nspasteboard concealed and transient markers are honoured by default, so a copied password produces empty panes rather than a translation, and never reaches the cache.
+8. **No new dependencies.** Every added package is code the user can no longer audit in one sitting.
 
 ---
 
 ## Performance Conventions
 
-- **Prewarm the model** at launch (`llm.prewarm()`) so the first translation is not the slow one.
-- **Cap the wait.** 20 s timeout on model calls; one retry for transient errors.
-- **Keep the hot path off the main thread's critical section.** The `usleep` pauses in `Replacer` are deliberate and short — they let modifier keys release and let the target app process the synthetic paste. Do not lengthen them without measuring.
-- **Rebuild UI lazily.** `rebuildMenu()` runs on settings change, not on a timer.
-- **Auto-dismiss transient UI.** The reader panel closes itself after 30 s so a forgotten popup does not linger.
+- **Prewarm the model, and actually use the warm session.** A session is warmed for one instruction string; keep exactly one, spend it on the next translation, and rebuild it afterwards. Measured on an M-series Mac this is a first token at 0.25 s instead of 2.4 s, and it is the single biggest lever in the app.
+- **Stream anything the user waits on.** Each snapshot carries the whole translation so far, so the first words appear immediately.
+- **Cap the wait.** 20 s timeout on model calls; one retry for a transient error, and only while nothing has been emitted.
+- **Cap the output.** `maximumResponseTokens` stops a runaway generation. It truncates hard rather than shortening gracefully, so set it far above what the task needs.
+- **Debounce typing and cancel the previous request.** An edit costs one run, not one per keystroke.
+- **Cache what is deterministic.** Greedy sampling makes a repeat safe to answer from memory.
 
 ---
 
 ## Versioning & Release
 
-- `CFBundleShortVersionString` in `Info.plist` is the user-visible version and must match the newest `CHANGELOG.md` heading. The menu-bar header reads it from the bundle at runtime.
+- `CFBundleShortVersionString` in `Info.plist` is the user-visible version and must match the newest `CHANGELOG.md` heading. The popover's gear menu reads it from the bundle at runtime.
 - `CFBundleVersion` is a monotonically increasing build number.
 - Every user-visible change gets a `CHANGELOG.md` entry — see [RELEASE_NOTES_GUIDE.md](RELEASE_NOTES_GUIDE.md).
-- Distribution is build-from-source (`./build.sh`); posting synthetic keystrokes is incompatible with App Store sandboxing.
+- Distribution is build-from-source (`./build.sh`); a notarized download may follow.
 
 ---
 
@@ -510,14 +521,16 @@ Before committing, verify:
 
 - [ ] `swift build` succeeds with no new warnings
 - [ ] `swift build -c release` succeeds (what `./build.sh` runs)
+- [ ] `./test.sh` passes
 - [ ] Manually verified on a supported Mac — see [testing/README.md](testing/README.md)
 - [ ] 4-space indentation, no tabs, no trailing whitespace
 - [ ] No `URLSession`, sockets, analytics, or new package dependencies
 - [ ] No `print` / `os_log`, and no debug code left behind
 - [ ] New settings go through `Store`, with a default and a merge-safe decode
+- [ ] New pure logic went into `EasyWriteCore` with a test, or there is a stated reason it could not
 - [ ] AppKit / SwiftUI state changes are on the main actor; escaping closures use `[weak self]`
-- [ ] No `try!` or `fatalError`; failures beep or explain, never crash
-- [ ] Clipboard snapshot/restore preserved on any path that touches the pasteboard
+- [ ] No `try!` or `fatalError`; failures explain themselves, never crash
+- [ ] Still exactly one pasteboard write, still no permission requested, still no `CGEvent`
 - [ ] User-facing strings are English, sentence case, typographic punctuation
 - [ ] `Info.plist` versions and `CHANGELOG.md` updated if the change is user-visible
 - [ ] Commit message is a capitalised sentence with no prefix tag
