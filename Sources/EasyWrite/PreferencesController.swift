@@ -61,17 +61,16 @@ struct PreferencesView: View {
     @ObservedObject var recorder: Recorder
 
     private let actions: [(key: String, title: String)] = [
-        ("formal", "Formal"), ("informal", "Informal"),
-        ("plain", "Plain"), ("english", "Read → English"),
+        ("translate", "Open the translator"),
     ]
 
     var body: some View {
         Form {
-            Section("Behaviour") {
-                Picker("Target language", selection: $store.targetCode) {
-                    ForEach(Languages.all) { Text($0.name).tag($0.code) }
-                }
-                Toggle("Preview before replacing", isOn: $store.previewBeforeReplace)
+            Section("Clipboard") {
+                Toggle("Ignore private clipboard content", isOn: $store.ignoresPrivateClipboard)
+                Text("Password managers and some apps mark what they copy as private or temporary. Leave this on and Easy Write opens with empty panes instead of reading it.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
             }
 
             Section("Style & glossary") {
@@ -100,7 +99,7 @@ struct PreferencesView: View {
             }
         }
         .formStyle(.grouped)
-        .frame(width: 440, height: 560)
+        .frame(width: 440, height: 470)
         .onDisappear { recorder.stop() }
     }
 }

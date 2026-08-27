@@ -2,6 +2,58 @@
 
 All notable changes to Easy Write are documented here.
 
+## [2.0] — 2026-08-27
+
+Easy Write is a translator now, not a rewriter. It reads what you copied and shows the translation in
+its own popover, which means it no longer needs any permission at all.
+
+### Added
+- **A translator popover at the menu bar.** Copy text anywhere, press `⇧⌃Z` or click the menu-bar
+  icon, and a popover opens with what you copied on the left and the translation on the right. Press
+  the shortcut again, or click outside, to close it.
+- **The translation appears as it is written.** The first words show up in about a quarter of a second
+  instead of after the whole answer, so long text no longer feels like a wait.
+- **Both directions, with a swap button.** Source and target are now separate dropdowns. The source
+  defaults to auto-detect; choose a real language and the swap button reverses the pair, keeping your
+  text and retranslating.
+- **The text is editable.** Fix a typo or trim a sentence in the left pane and the translation updates
+  on its own after a short pause — once, not once per keystroke.
+- **Repeats are instant.** The last twenty translations are remembered while the app is running, so
+  reopening the popover on text you already translated shows the result immediately. A retranslate
+  button forces a fresh run whenever you want one. Nothing is written to disk, and the list is gone
+  when you quit.
+- **Copied passwords are skipped.** Password managers mark what they copy as private, and so do apps
+  that put something on your clipboard for a moment. Easy Write now leaves the panes empty rather than
+  translating it, and never remembers it. There is a checkbox in Preferences if you would rather it
+  always read.
+
+### Changed
+- **No permission is required any more, and none is requested.** Version 1 needed Accessibility so it
+  could press ⌘C and ⌘V for you. Nothing is pasted back now, so that permission, its prompt, and the
+  menu item pointing at System Settings are all gone. There is nothing left to grant.
+- **Your clipboard is never touched unless you ask.** Easy Write reads it and writes to it only when
+  you press Copy. Version 1 borrowed the clipboard for every translation and handed it back from only
+  some of the paths out, which meant a translation that failed, timed out, or was cancelled could
+  leave your copied text replaced. That cannot happen now, because nothing borrows it.
+- **In-place replacement is gone.** The selection in the app you were using is no longer overwritten;
+  press Copy in the popover and paste it yourself. This is what buys the permission-free install, and
+  it is the trade to be aware of if version 1's replace-in-place was why you used it.
+- **One shortcut instead of four.** `⇧⌃Z` opens the translator. The separate formal, informal, plain
+  and read-to-English shortcuts are gone, along with the preview dialog and the reading popup. Pick
+  your formality with a line in the style guide ("address me formally, use *Sie*") — it applies to
+  every translation.
+- **Preferences is smaller.** It now holds the style guide, the one shortcut, and the private-clipboard
+  checkbox. The target language moved into the popover, where you change it more often.
+
+### Notes
+- Translation is deterministic: the same text and settings produce the same wording every time, which
+  is what makes the instant repeats trustworthy. On input the model cannot make sense of — a random
+  string rather than a sentence — that determinism shows up as a repeated phrase, cut off after a
+  sensible length rather than running away.
+- Your existing target language, style guide and login-item setting carry over. A shortcut you rebound
+  in version 1 does not, since the actions it was bound to no longer exist; the new one starts at
+  `⇧⌃Z` and is rebindable as before.
+
 ## [1.1.1] — 2026-07-14
 
 ### Fixed

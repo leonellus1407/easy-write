@@ -6,8 +6,9 @@ that way are very welcome.
 ## Getting set up
 
 ```bash
-./setup-signing.sh   # once — creates a stable self-signed identity so the Accessibility grant sticks
+./setup-signing.sh   # optional, once — a stable self-signed identity instead of an ad-hoc signature
 ./build.sh           # compile + bundle + sign
+./test.sh            # unit tests
 open EasyWrite.app
 ```
 
@@ -17,10 +18,9 @@ Requires macOS 26+ on Apple Silicon with Apple Intelligence enabled. See
 ## Good first contributions
 
 - More target languages (add to `Languages.swift`)
-- Translation history
-- Preview-before-replace polish
 - Better long-text handling
-- Accessibility / VoiceOver improvements
+- More tests for the pure logic in `EasyWriteCore`
+- VoiceOver and keyboard-navigation improvements in the popover
 
 ## Guidelines
 

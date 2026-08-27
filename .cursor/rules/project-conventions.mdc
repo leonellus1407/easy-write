@@ -5,9 +5,9 @@ alwaysApply: true
 
 # Easy Write — Project Conventions
 
-macOS 26+ menu-bar app (`LSUIElement`, no Dock icon), Swift 6 toolchain in Swift 5 language mode, built with Swift Package Manager. One executable target, `EasyWrite`. Entry point: `Sources/EasyWrite/main.swift` → `AppDelegate`.
+macOS 26+ menu-bar app (`LSUIElement`, no Dock icon), Swift 6 toolchain in Swift 5 language mode, built with Swift Package Manager. Three targets: the `EasyWriteCore` library (pure logic, no AppKit, no FoundationModels), the `EasyWrite` executable, and `EasyWriteCoreTests`. Entry point: `Sources/EasyWrite/main.swift` → `AppDelegate`.
 
-Translation runs on Apple's on-device Foundation Models. Requires Apple Silicon and Apple Intelligence at runtime.
+The app translates the clipboard into a popover anchored to the menu-bar icon. Translation runs on Apple's on-device Foundation Models. Requires Apple Silicon and Apple Intelligence at runtime.
 
 ## Authoritative Documentation
 
@@ -28,12 +28,13 @@ Read these before making changes:
 
 - **No network code** — no `URLSession`, no sockets, no analytics, no crash reporting. "Nothing leaves your Mac" is the product, not a preference.
 - **No third-party dependencies** — `Package.swift` declares no `dependencies:`. Standard library and Apple frameworks only.
-- **Never log or persist user text** — no `print`, no `os_log`, no translation history on disk. Selection text lives in memory for the duration of one translation.
+- **Never log or persist user text** — no `print`, no `os_log`, no translation history on disk. The translation cache is in memory, capped, and dies with the process.
 - **4 spaces** for indentation, never tabs.
 - **`@MainActor` by default** — every class that owns app state or an AppKit object is main-actor isolated. `HotKeyCenter` is the single exception among those (Carbon C callback; it hops back via `DispatchQueue.main.async`). SwiftUI views stay `struct`s, and static-only namespaces like `KeyDisplay` stay non-isolated — do not convert either into a class.
 - **Settings only through `Store.shared`** — never read or write `UserDefaults` directly for a user setting. (The `didInitLoginItem` first-run flag in `AppDelegate` is the one pre-existing exception; do not add more.)
-- **Never crash on a translation failure** — beep, flash the status icon, and carry on. No `try!`, no `fatalError`.
-- **Always restore the clipboard** after a swap; snapshot it first.
+- **Never crash on a translation failure** — show the reason in the popover and carry on. No `try!`, no `fatalError`.
+- **Easy Write reads the pasteboard and never writes it**, except in the single code path behind the popover's Copy button — `Clipboard.write`. A test enforces the count; do not add a second write.
+- **Request no permission** — the app asks for nothing, and there is no `CGEvent` and no Accessibility check anywhere. Do not reintroduce a synthetic keystroke to make some later convenience work.
 - **User-facing text**: English, sentence case, typographic punctuation (`’ “ ” –`), no emoji in app strings.
 - **Never weaken the guardrail mode** — `.permissiveContentTransformations` exists because the default filter false-flags ordinary text for translation.
 
@@ -42,11 +43,12 @@ Read these before making changes:
 ```bash
 swift build                 # debug
 swift build -c release      # what build.sh compiles
+./test.sh                   # unit tests (wraps `swift test`; needed when only the CLT are installed)
 ./build.sh                  # release build → EasyWrite.app bundle → codesign
-./setup-signing.sh          # one-time: stable self-signed identity (keeps the Accessibility grant)
+./setup-signing.sh          # optional, one-time: stable self-signed identity
 ```
 
-Builds only on macOS 26+ / Apple Silicon. There is **no test target** — see `docs/conventions/testing/README.md` before writing tests. There is no linter and no CI; `swift build` must finish warning-free.
+Builds only on macOS 26+ / Apple Silicon. The suite covers `EasyWriteCore` and the single-pasteboard-write invariant and nothing else — see `docs/conventions/testing/README.md` before claiming coverage. There is no linter and no CI; `swift build` must finish warning-free.
 
 ## Git
 
@@ -56,7 +58,7 @@ Builds only on macOS 26+ / Apple Silicon. There is **no test target** — see `d
 
 ## Versioning
 
-A user-visible release bumps `CFBundleShortVersionString` **and** `CFBundleVersion` in `Info.plist`, and adds a `CHANGELOG.md` entry. The menu-bar header reads the short version straight from the bundle.
+A user-visible release bumps `CFBundleShortVersionString` **and** `CFBundleVersion` in `Info.plist`, and adds a `CHANGELOG.md` entry. The popover's gear menu reads the short version straight from the bundle.
 
 ## Planning Work
 

@@ -1,5 +1,5 @@
 ---
-description: Testing patterns for Easy Write — and the fact that no test target exists yet
+description: Testing patterns for Easy Write — what the suite covers, and the much larger part it does not
 globs: "Tests/**/*.swift"
 alwaysApply: false
 ---
@@ -10,36 +10,32 @@ Full guide: `docs/conventions/testing/README.md`
 
 ## Current state — read this first
 
-**There is no test target.** `Package.swift` declares a single `.executableTarget`, there is no `Tests/` directory, and `swift test` does not run anything. Do not write documentation, plans, or PR text that implies a suite exists.
+There is a small suite: `EasyWriteCoreTests` covers the `EasyWriteCore` library, plus one test that scans `Sources/` to prove exactly one function writes the pasteboard. **There is no CI**, so nobody runs it but you.
 
-Verification today is a manual smoke test on a supported Mac (see the full guide). Anything that must be proven automatically needs the target added first.
-
-## Adding the target
-
-```swift
-.testTarget(
-    name: "EasyWriteTests",
-    dependencies: ["EasyWrite"],
-    path: "Tests/EasyWriteTests"
-)
-```
-
-Prefer extracting the pure logic under test into a plain library target and depending on that, rather than importing the executable. Adding a test target is a change to the package layout — get agreement before doing it as a side effect of another task.
-
-## Key Rules (once tests exist)
-
-- **Use Swift Testing** (`import Testing`, `@Test`, `#expect`) for new tests; the Swift 6 toolchain ships it.
-- **Test pure logic only** — key-code formatting, language lookup, response cleaning, shortcut merge/decode. `@MainActor` AppKit flows and the on-device model are not unit-testable.
-- **Never call the model in a test** — it needs Apple Intelligence hardware and gives non-deterministic output.
-- **Never touch `UserDefaults.standard`** — inject a `UserDefaults(suiteName:)` and remove it afterwards.
-- **Naming**: given/when/then, as the test's display name: `@Test("given a stored shortcut, when defaults gain a new action, then the new default is merged in")`.
-- **One behaviour per test.** No shared mutable state between tests.
-- **English** in test names, comments, and failure messages.
+Everything with a UI, a hot-key, or a model call has no automated coverage at all. So "the tests pass" is a much smaller claim than it sounds — say what actually ran, and record a manual reproduction for the rest.
 
 ## Run
 
 ```bash
-swift build            # the real gate today — must be warning-free
-swift test             # only after a test target exists
-./build.sh             # release bundle for manual verification
+./test.sh                                    # the suite
+./test.sh --filter TranslationCacheTests     # one suite
+swift build                                  # still the strongest signal — must be warning-free
+./build.sh                                   # release bundle for manual verification
 ```
+
+Use `./test.sh` rather than `swift test`: with only the Command Line Tools installed, swift-testing ships as a framework SwiftPM leaves off the search path and `swift test` fails with `no such module 'Testing'`. The script adds it and passes arguments through.
+
+## Where a test can reach
+
+`EasyWriteCore` is a plain library with no AppKit and no FoundationModels, and the tests depend on it. Pure logic goes there so it can be tested; anything importing AppKit or the model stays in `EasyWrite` and is verified by hand. Moving an existing type across that line is a change to the package layout — get agreement first.
+
+## Key Rules
+
+- **Use Swift Testing** (`import Testing`, `@Test`, `#expect`); the Swift 6 toolchain ships it. XCTest is acceptable if you need something Swift Testing lacks; do not mix styles inside one file.
+- **Test pure logic** — language lookup, cache behaviour, key-code formatting, response cleaning, shortcut merge/decode. A source-scanning test is also fair game when the thing being protected is an invariant you can count rather than run.
+- **Never call the model in a test** — it needs Apple Intelligence hardware and takes seconds.
+- **Never touch `UserDefaults.standard`** — inject a `UserDefaults(suiteName:)` and remove it afterwards.
+- **Never touch `NSPasteboard.general`** — a test must not read or write the developer's clipboard.
+- **Naming**: given/when/then, as the test's display name: `@Test("given a stored translation, when the style guide changes, then the request misses")`.
+- **One behaviour per test.** No shared mutable state between tests.
+- **English** in test names, comments, and failure messages.
